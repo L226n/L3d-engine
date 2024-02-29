@@ -17,6 +17,7 @@ f_clock:
 	mov	r8, qword[fps_counter]	;move the fps counter into r8
 	mov	qword[rsi+rdx], r8	;move counter into space
 	mov	edx, dword[screen_size]	;screen size in bytes
+	add	edx, TOP_SIZE
 	syscall	
 	mov	rax, [frames]	;load frames addr again
 	mov	ebx, dword[rax]	;moves that into ebx, so shifts dont affect memory

@@ -1,3 +1,114 @@
+%macro	interpolate_uvd	1
+	fld	dword[barycentric]	;load barycentric u coord
+	fld	dword[vertex_attr+%1]	;load v0 u coord
+	fmul	st1	;multiply
+	fld	dword[barycentric+4]	;load barycentric v coord
+	fld	dword[vertex_attr+12+%1]	;and v1 u coord
+	fmul	st1	;guess what comes next
+	fld	dword[barycentric+8]	;its just this but over again
+	fld	dword[vertex_attr+24+%1]
+	fmul	st1
+	fadd	st2	;takes the sum of all of these
+	fadd	st4
+	fst	dword[interpolated_uvd+%1]	;then this is interpolated value
+	emms	;its just a dot product btw
+%endmacro
+%macro	calc_attr	1
+	xor	rdx, rdx	;for mul operation
+	movzx	rax, word[r14+rcx]	;move face index into rax
+	mov	rbx, 16	;and 16 (length of vertex) into rbx
+	mul	rbx	;get start of vertex info for r14+rcx
+	add	rax, 4	;add 4 because of the 16 offset
+	fld	dword[r15+rax]	;load screenspace coord x
+	fist	dword[triangle+%1*8]	;store as int in tri struct
+	fld	dword[r15+rax+4]	;do same with y pos
+	fist	dword[triangle+%1*8+4]
+	lea	r8, [camera_position]	;distance from camera position
+	call	f_euclidean_distance	;get depth
+	fld	dword[vertex_depth]	;load depth
+	fld1	;and load 1
+	fdiv	st1	;recpirocal of vertex_depth
+	fst	dword[vertex_attr+%1*12+8]	;store in third position
+	sub	rax, 4	;remove 16 offset
+	shr	rax, 1	;and half to get uv position
+	fld	dword[r12+rax]	;load u coord
+	fdiv	st2	;divide by depth
+	fst	dword[vertex_attr+%1*12]	;store in position 1
+	fld	dword[r12+rax+4]	;do the same with v coord
+	fdiv	st3
+	fst	dword[vertex_attr+%1*12+4]
+	emms
+%endmacro
+f_map_texture:
+	push	rcx	;push rcx bc its important to stay the same
+	sub	rcx, 2	;decrease so it points to value before delimiter
+	call	f_get_bounding	;get the bounding box of coords
+	cmp	dword[bounding_box+8], 0	;check if xmax is 0 (completely offscreen)
+	jl	.end	;if yes, dont process this
+	cmp	dword[bounding_box+12], 0	;same but with ymax
+	jl	.end
+	mov	eax, dword[bounding_box]	;now you load in rax
+	inc	rax	;and increase it fsr cant remember why
+	cmp	ax, word[window_size+2]	;then check if xmin is larger than screen width
+	jge	.end	;then its still not visible
+	mov	eax, dword[bounding_box+4]	;same but with ymin
+	inc	rax
+	cmp	ax, word[available_window]	;this is 3 less than window height
+	jge	.end
+	call	f_resize_bounding	;resize bounding box to match window
+	calc_attr	2	;calculate attributes for vertex 2
+	sub	rcx, 2	;decrease pointer to vertex indexes
+	calc_attr	1	;attributes for v1
+	sub	rcx, 2
+	calc_attr	0	;and v0
+	xor	rax, rax	;clear upper bytes of rax and rbx
+	xor	rbx, rbx
+	mov	ebx, dword[bounding_box]	;move in start pos
+	mov	eax, dword[bounding_box+4]	;(xmin, ymin)
+.loop:
+	mov	dword[point], ebx	;set the point coords to rbx and rax
+	mov	dword[point+4], eax
+	call	f_barycentric_coords	;calc barycentric coords for this point
+	cmp	r8, 1	;check if outside of triangle
+	jz	.no_draw	;if yes, dont draw this point
+	interpolate_uvd	0	;interpolate u
+	interpolate_uvd	4	;interpolate v
+	interpolate_uvd	8	;interpolate d
+	fld	dword[interpolated_uvd+8]	;load depth reciprocal
+	fld1	;load 1
+	fdiv	st1	;reciprocal of reciprocal is non reciprocal interpolated depth
+	fld	dword[interpolated_uvd+4]	;load v coord
+	fmul	st1	;multiply by depth (perspective correction factor)
+	fst	dword[interpolated_uvd+4]	;store back
+	fld	dword[interpolated_uvd]	;same but with u coord
+	fmul	st2
+	fst	dword[interpolated_uvd]
+	emms	;reset stack
+	push	rax	;push values used in image sampling
+	push	r15
+	push	r13
+	lea	r13, [dimensions]	;use dimensions of image here
+	lea	r15, [cube_texture]
+	call	f_sample_image	;sample uv
+	mov	rdi, rax	;move position of sampled data into rdi
+	pop	r13
+	pop	r15
+	pop	rax
+	call	f_draw_point	;draw point in correct colour
+.no_draw:
+	cmp	ebx, dword[bounding_box+8]	;check if x counter is at end of row
+	jz	.inc_y	;if yes, increase y
+	inc	ebx	;otherwise just increase x
+	jmp	.loop	;and keep going
+.inc_y:
+	cmp	eax, dword[bounding_box+12]	;check if y is at end
+	jz	.end	;if yes, done
+	inc	eax	;otherwise increase y
+	mov	ebx, dword[bounding_box]	;and reset x
+	jmp	.loop	;loop over
+.end:
+	pop	rcx
+	ret
 f_check_visible:
 	push	rax	;push registers used
 	push	rbx
@@ -135,10 +246,10 @@ f_node_screen:
 .loop_reset:
 	cmp	ecx, dword[screen_size]	;checks if offset is same as screen size in bytes
 	jz	.end_reset	;if yes, finished resetting
-	cmp	byte[rdx+rcx+1], 27	;checks if current char is escape
+	cmp	byte[rdx+rcx+TOP_SIZE], 27	;checks if current char is escape
 	jnz	.no_set	;if no, dont reset bc its part of ui
-	mov	word[rdx+rcx+8], "23"	;otherwise, set the colour of the pixel to black
-	mov	byte[rdx+rcx+10], "2"	;232
+	mov	word[rdx+rcx+7+TOP_SIZE], "23"	;otherwise, set the colour of the pixel to black
+	mov	byte[rdx+rcx+9+TOP_SIZE], "2"	;232
 .no_set:
 	add	rcx, 13	;increase rcx by 13 (unit size)
 	jmp	.loop_reset	;loop over
@@ -169,7 +280,11 @@ f_node_screen:
 .draw_poly:
 	call	f_cull_backfaces	;cull backfaces
 	cmp	r8, 0	;if val is 0, then the face isnt valid
-	jnz	.cont_draw	;if val is 1, then draw the face
+	jz	.dont_draw	;if val is 1, then draw the face
+	call	f_map_texture
+	;mov	rdx, 101
+	;call	f_kill
+.dont_draw:
 	add	rcx, 2	;add 2 to rcx for next value
 	mov	rdx, rcx	;move rcx to rdx so backface culling doesnt get sad
 	jmp	.line_loop	;go to line loop
@@ -225,14 +340,8 @@ f_node_screen:
 	pop	rax	;.
 	ret
 f_draw_point:
-	cmp	ax, word[available_window]	;this just checks if the pixel is offscreen
-	jae	.ret	;its used for persistent drawing
-	cmp	ax, -1
-	jz	.ret
-	cmp	bx, word[window_size+2]
-	jae	.ret
-	cmp	bx, -1
-	jz	.ret
+	push	rax	;push position registers
+	push	rbx
 	push	rcx	;push some registers
 	push	rdx	;..
 	push	rax	;.
@@ -244,11 +353,14 @@ f_draw_point:
 	mul	dword[unit_size]	;and unit size
 	add	eax, ecx	;add the two together
 	mov	rcx, [framebuf]	;move the shared memory framebuffer into rcx
-	mov	word[rcx+rax+8], "10"	;and move escapes for color
-	mov	byte[rcx+rax+10], "6"	;move colour
-	pop	rdx	;..
-	pop	rcx	;.
-.ret:
+	movzx	rdx, word[rdi]
+	mov	word[rcx+rax+7+TOP_SIZE], dx	;and move escapes for color
+	movzx	rdx, byte[rdi+2]
+	mov	byte[rcx+rax+9+TOP_SIZE], dl	;move colour
+	pop	rdx	;....
+	pop	rcx	;...
+	pop	rbx	;..
+	pop	rax	;.
 	ret
 f_draw_line:
 	push	r15	;god damn
@@ -378,10 +490,11 @@ f_draw_line:
 f_initialise_screen:
 	xor	rax, rax	;forgor
 	mov	r15, [framebuf]	;loads frame buffer into r15
-	mov	byte[r15], 10	;moves a 10 for the first byte
-	inc	rax	;then increase rax to skip past 10 for future
+	mov	byte[r15], 27	;moves a 10 for the first byte
+	mov	word[r15+1], "[H"
+	add	rax, TOP_SIZE	;then increase rax to skip past 10 for future
 .loop:
-	cmp	rax, 499201	;checks if at end of buffer
+	cmp	rax, 499200 + TOP_SIZE	;checks if at end of buffer
 	jz	.end	;if yes, go to end
 	xor	rbx, rbx	;otherwise, reset rbx
 .loop_segment:
@@ -400,8 +513,9 @@ f_initialise_screen:
 	mov	edx, eax	;store eax for later (row width)
 	mov	ebx, dword[screen_size]	;move the screen size in bytes into ebx
 	sub	ebx, eax	;subtract eax from that, so last line start in ebx
-	add	ebx, 5	;add 5 (offset for first middle char)
+	add	ebx, 4 + TOP_SIZE	;add 5 (offset for first middle char)
 	mov	eax, dword[screen_size]	;moves screen size in bytes into eax
+	add	eax, TOP_SIZE - 1
 	mov	r14, "╰"	;start
 	mov	r13, "─"	;middle
 	mov	r12, "╯"	;end
@@ -492,4 +606,32 @@ f_generate_row:
 	pop	rcx	;aaand ur done
 	pop	rbx
 	pop	rax
+	ret
+f_extrude_point:
+	push	r15
+	add	r15, 4
+	mov	rbx, 16
+	mul	rbx
+	add	r15, rax
+	fld	dword[center_coords+8]
+	fld	dword[center_coords+4]
+	fld	dword[center_coords]
+	fld	dword[r15+8]
+	fsub	st3
+	fld	dword[r15+4]
+	fsub	st3
+	fld	dword[r15]
+	fsub	st3
+	fld	dword[operation_multiplier]
+	fmul	TO	st1
+	fmul	TO	st2
+	fmulp	st3
+	fadd	st3
+	fstp	dword[r15]
+	fadd	st3
+	fstp	dword[r15+4]
+	fadd	st3
+	fstp	dword[r15+8]
+	emms
+	pop	r15
 	ret

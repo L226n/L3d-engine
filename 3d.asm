@@ -4,8 +4,10 @@
 %include	"math.asm"
 %include	"clock.asm"
 %include	"poll.asm"
+%include	"files.asm"
 ;external files
 section	.data
+	TOP_SIZE	equ	4
 	ICANON	equ	1<<1
 	msg	db	"msg", 10
 	matrix_screen	dd	16, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 234356
@@ -39,8 +41,11 @@ section	.data
 	;this is a buffer for rotation angles
 	angle_neg	dd	-0.05
 	;and this is the negative version
-	cube_matrix	dd	16, -0.5, -0.5, -10.5, 1.0, 0.5, -0.5, -10.5, 1.0, -0.5, 0.5, -10.5, 1.0, 0.5, 0.5, -10.5, 1.0, -0.5, -0.5, -9.5, 1.0, 0.5, -0.5, -9.5, 1.0, -0.5, 0.5, -9.5, 1.0, 0.5, 0.5, -9.5, 1.0, 234356
-	cube_faces	dw	0, 1, 3, 2, 65534, 1, 0, 4, 5, 65534, 5, 7, 3, 1, 65534, 3, 7, 6, 2, 65534, 2, 6, 4, 0, 65534, 4, 6, 7, 5, 65534, 65535
+	cube_matrix	dd	16, -1.0, 0.0, 0.0, 1.0, 0.0, -0.5, 0.0, 1.0, 0.0, 0.0, -0.5, 1.0, 0.0, 0.5, 0.0, 1.0, 0.0, 0.0, 0.5, 1.0, 1.0, 0.0, 0.0, 1.0, -1.5, 0.5, 0.0, 1.0, -1.5, -0.5, 0.0, 1.0, 234356
+	cube_faces	dw	0, 1, 2, 65534, 0, 2, 3, 65534, 0, 3, 4, 65534, 0, 4, 1, 65534, 5, 2, 1, 65534, 5, 3, 2, 65534, 5, 4, 3, 65534, 5, 1, 4, 65534, 0, 6, 7, 65534, 0, 7, 6, 65534, 65535
+	cube_uv	dd	1.0, 0.5, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 234356
+	cube_texture	db	"020", "105", "105", "105", "105", "105", "105", "017", "017", "105", "105", "105", "105", "105", "020", "020", "020", "020", "020", "020", "020", "017", "017", "020", "020", "020", "020", "020", "020", "020", "017", "017", "020", "020", "020", "017", "020", "020", "020", "017", "020", "020", "020", "017", "017", "017", "020", "020", "020", "017", "020", "020", "020", "017", "020", "020", "020", "020", "017", "017", "020", "020", "020", "017", "017", "020", "020", "020", "020", "020", "020", "020", "020", "020", "020", "020", "020", "017", "017", "020", "020", "020", "020", "020", "020", "020", "020", "020", "020", "020", "020", 0
+	dimensions	dw	7, 13
 	;these are matrices for a cube
 	cube2	times 34	dd	0.0
 	cube3	times 34	dd	0.0
@@ -89,6 +94,25 @@ section	.data
 	float_test	dd	-9.38
 	float_multiplier	dd	100.0
 	cw	dw	0
+	;fpu control word
+	file_separator	dw	65535
+	;separator between 1 and 0
+	file	db	"fish.l3d", 0
+	;file path
+	filesize	dq	0
+	;size of file data
+	mem_available	dq	0
+	;available memory
+	last_memory	dq	0
+	;last memory addr  space
+	reserved_pos	dw	0
+	;position in reserved memory buffer
+	imported_addr	dq	0, 0
+	center_coords	dd	0.0, 0.0, 0.0
+	operation_multiplier	dd	2.0
+	vertex_depth	dd	0.0
+	bounding_box	dd	0, 0, 0, 0
+	interpolated_uvd	dd	0, 0, 0
 section	.bss
 	termios:
 		c_iflag	resd	1
@@ -109,9 +133,19 @@ section	.bss
 	;window size struct
 	pipe	resd	2
 	;pipe fd
+	reserved_memory	resq	100
+	;array for start addresses and lengths of reserved memory
+	triangle	resd	6
+	point	resd	2
+	bc_vectors	resd	6
+	dot_products	resd	5
+	denom	resq	1
+	barycentric	resd	3
+	vertex_attr	resd	9
 section	.text
 	global	_start
 _start:
+	call	f_read_obj
 	finit	;initialise FPU control words
 	mov	rax, 13	;system call for sys_rt_sigaction
 	mov	rdi, 2	;signal here is SIGINT
@@ -162,13 +196,12 @@ _start:
 	mul	word[window_size]	;multiply window height by width
 	mov	rbx, 13	;then multiplies it by 13 (one unit is 13 bytes)
 	mul	rbx	;actual multiplication
-	;add	eax, 13
 	mov	dword[screen_size], eax	;moves result into screen size
 	call	f_initialise_screen	;prepare the screen for display
 	mov	rax, 22	;system call for sys_pipe	
 	mov	rdi, pipe	;store resulting fds here
 	syscall
-	mov	rax, 57	;system call for sys_split
+	mov	rax, 57	;system call for sys_fork
 	syscall
 	cmp	rax, 0	;checks if child process
 	jz	f_clock	;if yes, go to clock process
@@ -197,11 +230,6 @@ _start:
 	mov	rsi, buf1	;buffer to store result (discarded)
 	mov	rdx, 1	;length to read (doesnt matter)
 	syscall
-	;mov	qword[tv_usec], 34333333
-	;mov	rax, 35
-	;mov	rdi, time
-	;syscall
-	;artificial lag
 	call	f_input_cases	;input cases yeah
 	mov	rax, [poll]	;move in polling space
 	cmp	byte[rax], 0	;check if no char is sent
@@ -214,39 +242,46 @@ _start:
 	lea	r14, [matrix_camera_rotate]	;matrix B is rotation matrix
 	lea	r13, [matrix_camera]	;matrix C is camera matrix (result)
 	call	f_multiply_matrix	;get camera matrix!
-	;fld	dword[angle]
-	;fld	dword[cube_angle]
-	;fadd	st1
-	;fst	dword[cube_angle]
-	;emms
+	;jmp	.norot
+	fld	dword[angle]
+	fld	dword[cube_angle]
+	fadd	st1
+	fst	dword[cube_angle]
+	emms
 	;lea	r15, [cube_angle]
 	;call	f_rotate_matrix_x
-	;lea	r15, [cube_angle]
-	;call	f_rotate_matrix_y
-	;lea	r15, [cube_matrix]
-	;lea	r14, [matrix_rotation_y]
-	;lea	r13, [cube2]
-	;call	f_multiply_matrix
+	lea	r15, [cube_angle]
+	call	f_rotate_matrix_y
+	mov	r15, [imported_addr]
+	lea	r14, [matrix_rotation_y]
+	lea	r13, [cube2]
+	call	f_multiply_matrix
 	;lea	r15, [cube2]
 	;lea	r14, [matrix_rotation_x]
 	;lea	r13, [cube3]
 	;call	f_multiply_matrix
-	lea	r15, [cube_matrix]	;matrix A is cube nodes matrix
+	lea	r15, [cube2]
+	jmp	.rot
+.norot:
+	mov	r15, [imported_addr]
+.rot:
 	lea	r14, [matrix_camera]	;multiply by new camera matrix
-	lea	r13, [cube2]	;result in copy memory
+	lea	r13, [cube3]	;result in copy memory
 	call	f_multiply_matrix	;multiply them
-	lea	r15, [cube2]	;nodes from last multiplication in cube2
+	lea	r15, [cube3]	;nodes from last multiplication in cube2
 	lea	r14, [matrix_projection]	;multiply by projection matrix
-	lea	r13, [cube3]	;and result in first cube matrix
+	lea	r13, [cube2]	;and result in first cube matrix
 	call	f_multiply_matrix	;go
-	lea	r15, [cube3]	;use r15 to hold matrix to normalise
+	lea	r15, [cube2]	;use r15 to hold matrix to normalise
 	call	f_normalise_matrix	;normalise matrix
-	lea	r15, [cube3]	;matrix A is result of normalisation
+	lea	r15, [cube2]	;matrix A is result of normalisation
 	lea	r14, [matrix_screen]	;matrix B is screen matrix
-	lea	r13, [cube2]	;result matrix
+	lea	r13, [cube3]	;result matrix
 	call	f_multiply_matrix	;bdsaojoicxzoiwadpszx
-	lea	r15, [cube2]	;matrix to put onto screen
-	lea	r14, [cube_faces]	;array containing cube edge indexes
+	lea	r15, [cube3]	;matrix to put onto screen
+	mov	r14, [imported_addr+8]	;array containing cube edge indexes
+	mov	r13, [imported_addr]
+	lea	r12, [cube_uv]
 	call	f_node_screen	;project onto screen
 	mov	rax, [poll]	;moves the address of the shared memory for polling 
 	mov	qword[rax], 0	;then clears the previously polled inputs
@@ -254,10 +289,24 @@ _start:
 	inc	dword[rax]	;increases it so a successful frame is counted
 	jmp	.loop	;loop over
 f_kill:
+	push	rdx
 	mov	rax, 11	;sys_munmap
 	mov	rdi, [poll]	;start of memory to unmap
 	mov	rsi, 499712	;size of memory blah blah
 	syscall
+	xor	rbx, rbx
+.unmap_loop:
+	cmp	qword[reserved_memory+rbx], 0
+	jz	.done
+	mov	r8, qword[reserved_memory+rbx]
+	mov	rax, 11
+	mov	rdi, r8
+	mov	rsi, qword[reserved_memory+rbx+8]
+	syscall
+	add	rbx, 16
+	jmp	.unmap_loop
+.done:
 	mov	rax, 60	;sys_exit
-	mov	rdi, 101	;weird exit code so yk it exited right
+	pop	rdx
+	mov	rdi, rdx	;weird exit code so yk it exited right
 	syscall

@@ -1,3 +1,278 @@
+f_resize_bounding:	
+	cmp	dword[bounding_box], 0	;this resizes the bounding box to fit screen
+	jge	.skip_xl	;this part checks if the x is left off screen
+	mov	dword[bounding_box], 0	;if it is, set it to 0 to skip offscreen processing
+.skip_xl:
+	movzx	rax, word[window_size+2]	;if x is greater than screen space
+	dec	rax	;this thing
+	cmp	dword[bounding_box+8], eax	;its just this for everything
+	jle	.skip_xg
+	mov	dword[bounding_box+8], eax
+.skip_xg:
+	cmp	dword[bounding_box+4], 0
+	jge	.skip_yl
+	mov	dword[bounding_box+4], 0
+.skip_yl:
+	movzx	rax, word[available_window]
+	dec	rax
+	cmp	dword[bounding_box+12], eax
+	jle	.skip_yg
+	mov	dword[bounding_box+12], eax
+.skip_yg:
+	ret
+f_check_minmax:
+	fld	dword[r15+rdi]	;this function checks values against the min and max values
+	fld	dword[bounding_box]	;compare onscreen x with bounding box xmin
+	fcom	st1	;compare
+	fstsw	ax
+	sahf
+	jna	.not_lower_x	;if bounding box is lower skip
+	mov	ebx, dword[r15+rdi]	;otherwise move value into bounding box
+	mov	dword[bounding_box], ebx
+	jmp	.not_greater_x
+.not_lower_x:
+	fld	dword[bounding_box+8]	;now with xmax coord
+	fcom	st2	;and its the same thing
+	fstsw	ax	;lots of repetition with texture mapping
+	sahf
+	jnb	.not_greater_x
+	mov	ebx, dword[r15+rdi]
+	mov	dword[bounding_box+8], ebx
+.not_greater_x:
+	fld	dword[r15+rdi+4]	;y values instead so exciting
+	fld	dword[bounding_box+4]	;ymin again
+	fcom	st1
+	fstsw	ax
+	sahf
+	jna	.not_lower_y
+	mov	ebx, dword[r15+rdi+4]
+	mov	dword[bounding_box+4], ebx
+	jmp	.not_greater_y
+.not_lower_y:
+	fld	dword[bounding_box+12]	;ymax
+	fcom	st2
+	fstsw	ax
+	sahf
+	jnb	.not_greater_y
+	mov	ebx, dword[r15+rdi+4]
+	mov	dword[bounding_box+12], ebx
+.not_greater_y:
+	emms	;done thank god it was so boring
+	ret
+f_get_bounding:
+	push	rcx	;push rcx (reference position)
+	movzx	rax, word[r14+rcx]	;standard code to get screen space coords
+	mov	rbx, 16
+	mul	rbx
+	add	rax, 4
+	mov	rbx, qword[r15+rax]	;load screen space coords into rbx
+	mov	qword[bounding_box], rbx	;move that to initialise bounding box
+	mov	qword[bounding_box+8], rbx	;for x and y
+	sub	rcx, 2	;decrease rcx
+	movzx	rax, word[r14+rcx]	;get position again
+	mov	rbx, 16	;bc face indexes arent always equally spaced
+	mul	rbx
+	add	rax, 4
+	mov	rdi, rax	;use rdi for this
+	call	f_check_minmax	;and check if its min or max
+	sub	rcx, 2	;same thing again
+	movzx	rax, word[r14+rcx]
+	mov	rbx, 16
+	mul	rbx
+	add	rax, 4
+	mov	rdi, rax
+	call	f_check_minmax
+	fld	dword[bounding_box+12]	;load all coords and convert them to integers
+	fist	dword[bounding_box+12]
+	fld	dword[bounding_box+8]
+	fist	dword[bounding_box+8]
+	fld	dword[bounding_box+4]
+	fist	dword[bounding_box+4]
+	fld	dword[bounding_box]
+	fist	dword[bounding_box]
+	emms
+	pop	rcx
+	ret
+f_euclidean_distance:
+	fld	dword[r13+rax]	;load object space coords
+	fld	dword[r8]	;and load point to compare with
+	fsub	st1	;subtract object space coords from point
+	fld	st0	;duplicate value
+	fmul	st1	;and multiply by itself (squared)
+	fst	dword[buf1]	;store in buffer 1
+	emms	;stack cant hold all values so reset it
+	fld	dword[r13+rax+4]	;load same values
+	fld	dword[r8+4]	;but y coords not x
+	fsub	st1
+	fld	st0
+	fmul	st1	;u dont have to store after this
+	fld	dword[r13+rax+8]	;same thing but with z coords
+	fld	dword[r8+8]
+	fsub	st1
+	fld	st0
+	fmul	st1
+	fld	dword[buf1]	;load the x value
+	fadd	st1	;add them all together
+	fadd	st4	;yeah
+	fsqrt	;and square root it
+	fst	dword[vertex_depth]	;store in vertex depth
+	emms
+	ret
+f_sample_image:
+	push	rbx	;push	registers (return is rax soooo no rax)
+	push	rcx
+	fild	word[r13]	;load image size x
+	fld	dword[interpolated_uvd]	;load uv coords x
+	fmul	st1	;multiply together to get cartesian coords
+	fist	dword[interpolated_uvd]	;store back in uv coords bc they are interpolated anyway
+	fild	word[r13+2]	;do the same but with y positions
+	fld	dword[interpolated_uvd+4]
+	fmul	st1
+	fist	dword[interpolated_uvd+4]
+	emms	;reset stack
+	mov	eax, dword[interpolated_uvd]	;move in cartesian x
+	mov	rcx, 3	;3
+	mul	rcx	;multiply by 3 (pixel width ??? lol thats not making sense)
+	mov	rbx, rax	;store in rbx
+	mov	eax, dword[interpolated_uvd+4]	;do same but with y coords
+	mov	rcx, 3	;3
+	mul	rcx	;go again
+	mul	word[r13]	;multiply it by image width also to move to next row
+	add	rax, rbx	;add together to get offset
+	add	rax, r15	;add address of image buffer
+	pop	rcx	;pop back registers
+	pop	rbx
+	ret
+f_barycentric_coords:
+	push	rax
+	push	rbx
+	mov	eax, dword[triangle+8]	;this bit calculates vectors between different points
+	sub	eax, dword[triangle]	;in this case its between point B and point A
+	mov	dword[bc_vectors], eax	;store this as vector 0
+	mov	eax, dword[triangle+12]	;the above was for X, now this is for Y
+	sub	eax, dword[triangle+4]	;still point B and A
+	mov	dword[bc_vectors+4], eax
+	mov	eax, dword[triangle+16]	;this is now X position for point C and A
+	sub	eax, dword[triangle]
+	mov	dword[bc_vectors+8], eax
+	mov	eax, dword[triangle+20]	;and Y position for point C and A
+	sub	eax, dword[triangle+4]
+	mov	dword[bc_vectors+12], eax
+	mov	eax, dword[point]	;now its different, its between point P and A
+	sub	eax, dword[triangle]	;(X position)
+	mov	dword[bc_vectors+16], eax
+	mov	eax, dword[point+4]	;Y position for P to A
+	sub	eax, dword[triangle+4]
+	mov	dword[bc_vectors+20], eax
+	mov	eax, dword[bc_vectors]	;now calculate dot product of V0 and V0
+	mul	eax	;multiply it by itself
+	mov	dword[dot_products], eax	;and store as d00
+	mov	eax, dword[bc_vectors+4]	;load Y positions instead
+	mul	eax	;multiply by itself again
+	add	dword[dot_products], eax	;add to other thing
+	mov	eax, dword[bc_vectors]	;same thing for dot product of V0 and V1
+	mov	ebx, dword[bc_vectors+8]	;except this multiplies by different (V1) values
+	mul	ebx
+	mov	dword[dot_products+4], eax	;store as d01
+	mov	eax, dword[bc_vectors+4]	;now Y pos
+	mov	ebx, dword[bc_vectors+12]
+	mul	ebx
+	add	dword[dot_products+4], eax
+	mov	eax, dword[bc_vectors+8]	;this is now d11
+	mul	eax
+	mov	dword[dot_products+8], eax	;d11 position
+	mov	eax, dword[bc_vectors+12]
+	mul	eax
+	add	dword[dot_products+8], eax
+	mov	eax, dword[bc_vectors+16]	;this is now d02
+	mov	ebx, dword[bc_vectors]
+	mul	ebx
+	mov	dword[dot_products+12], eax	;d02 position
+	mov	eax, dword[bc_vectors+20]
+	mov	ebx, dword[bc_vectors+4]
+	mul	ebx
+	add	dword[dot_products+12], eax
+	mov	eax, dword[bc_vectors+16]	;and finally this is now d12
+	mov	ebx, dword[bc_vectors+8]
+	mul	ebx
+	mov	dword[dot_products+16], eax	;d12 position
+	mov	eax, dword[bc_vectors+20]
+	mov	ebx, dword[bc_vectors+12]
+	mul	ebx
+	add	dword[dot_products+16], eax
+	mov	eax, dword[dot_products]	;rax is now d00
+	mov	ebx, dword[dot_products+8]	;and rbx d11
+	mul	ebx	;multiply them by each other
+	mov	qword[denom], rax	;and store this in denominator quad
+	mov	eax, dword[dot_products+4]	;d01 is in rax
+	mul	eax	;and multiplied by itself
+	sub	qword[denom], rax	;subtract this from the denominator
+	;denom = d00 * d11 - d01 * d01
+	fild	qword[denom]	;load denominator to divide value by
+	fild	dword[dot_products+8]	;load d11
+	fild	dword[dot_products+12]	;and d02
+	fmul	st1	;multiply them
+	fild	dword[dot_products+4]	;load d01
+	fild	dword[dot_products+16]	;and d12
+	fmul	st1	;multiply them also
+	fsubr	st2	;u = d11 * d02 - d01 * d12
+	fdiv	st4	;divide by denominator
+	fst	dword[barycentric+4]	;and store as v
+	emms	;reset
+	fild	qword[denom]	;same thing again different values
+	fild	dword[dot_products]	;d00
+	fild	dword[dot_products+16]	;d12
+	fmul	st1
+	fild	dword[dot_products+4]	;d01
+	fild	dword[dot_products+12]	;d02
+	fmul	st1
+	fsubr	st2	;v = d00 * d12 - d01 * d02
+	fdiv	st4	;divided by denom again
+	fst	dword[barycentric+8]	;store as w
+	fld	dword[barycentric+4]	;load v
+	fld1	;and 1
+	fsub	st1	;subtract both values from 1
+	fsub	st2
+	fst	dword[barycentric]	;and the result is u
+	emms
+	xor	r8, r8	;reset r8 (triangle bounds calculator)
+	fldz	;load 0 and 1
+	fld1
+	fld	dword[barycentric]	;and u coord
+	fcom	st1	;check against 1
+	fstsw	ax
+	sahf
+	ja	.outside	;if its higher, its outside triangle
+	fcom	st2	;compare with 0
+	fstsw	ax
+	sahf
+	jb	.outside	;if its lower, its also outside
+	fld	dword[barycentric+4]	;do the same for v coords
+	fcom	st2
+	fstsw	ax
+	sahf
+	ja	.outside
+	fcom	st3
+	fstsw	ax
+	sahf
+	jb	.outside
+	fld	dword[barycentric+8]	;and w coords
+	fcom	st3
+	fstsw	ax
+	sahf
+	ja	.outside
+	fcom	st4
+	fstsw	ax
+	sahf
+	jb	.outside
+	jmp	.end	;skip r8 setting
+.outside:
+	inc	r8	;increase r8 to show that outside triangle
+.end:
+	emms	;reset stack
+	pop	rbx
+	pop	rax
+	ret
 f_cross_product:
 	fld	dword[r15+4]	;the cross product is weird and uses an odd formula
 	fld	dword[r14+8]	;but its easy to program so thats ok
@@ -169,6 +444,61 @@ f_insert_location:
 	mov	qword[rsi+rdx+104], r8
 	mov	r8, qword[location_string+88]
 	mov	qword[rsi+rdx+112], r8
+	ret
+f_calc_malloc:
+	push	rbx	;push all registers
+	push	rcx	;lots of them
+	push	rdx
+	push	rdi
+	push	rsi
+	push	r10
+	push	r9
+	push	r8
+	cmp	rax, qword[mem_available]	;check if needed memory is less than available (no allocation)
+	jbe	.no_allocate	;if its below or equal, then no allocation is needed
+	push	rax	;push rax (requested memory)
+	xor	rbx, rbx	;reset page counter
+.loop:
+	add	rbx, 4096	;always allocate at least 1 page if memory isnt available
+	sub	rax, 4096	;take away one page
+	cmp	rax, 0	;compare rax with 0
+	jle	.allocate	;if its lower or equal, allocate memory with current page size
+	jmp	.loop	;else loop over
+.no_allocate:
+	mov	rbx, qword[last_memory]	;move last memory place into rbx
+	mov	r12, rbx	;move that into r11 (returns place to write)
+	add	qword[last_memory], rax	;add rax into last memory position (requested size)
+	sub	qword[mem_available], rax	;subtract requested size from available memory
+	pop	rax
+	jmp	.end	;go to end
+.allocate:
+	mov	rax, 9	;system call for sys_mmap
+	mov	rdi, 0	;automatic start
+	mov	rsi, rbx	;size in pages in rbx
+	mov	rdx, 3	;PROT_READ and PROT_WRITE
+	mov	r10, 2 | 32	;use anonymous private mapping
+	mov	r8, -1	;ignored bc its anonymous
+	mov	r9, 0	;also anonymous thing
+	syscall
+	mov	r12, rax	;move the start into r11 for return
+	movzx	rcx, word[reserved_pos]	;move reserved space index into rcx
+	mov	qword[reserved_memory+rcx], rax	;move address into deallocation table
+	mov	qword[reserved_memory+rcx+8], rbx	;and size
+	add	word[reserved_pos], 16	;add 16 to the counter (2 qwords)
+	add	rax, rbx	;add the requested size to mem addr
+	mov	qword[last_memory], rax	;moves that into last memory pos
+	pop	rax	;get back requested size 
+	mov	qword[mem_available], rbx	;move allocated size into memory counter
+	sub	qword[mem_available], rax	;then subtract size used
+.end:
+	pop	r8	;pop back everything
+	pop	r9
+	pop	r10
+	pop	rsi
+	pop	rdi
+	pop	rdx
+	pop	rcx
+	pop	rbx
 	ret
 f_inc_bcd:
 	inc	dword[fps_counter+4]	;increases lsb of fps counter
