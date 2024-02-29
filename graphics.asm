@@ -506,15 +506,21 @@ f_initialise_screen:
 	inc	rbx	;and rbx
 	jmp	.loop_segment	;loop over
 .end:
+	mov	byte[r15+rax], 27
+	mov	dword[r15+rax+1], "[48;"
+	mov	dword[r15+rax+5], "5;00"
+	mov	word[r15+rax+9], "0m"
 	movzx	rcx, word[window_size+2]	;move window width into rcx (in half val)
 	mov	eax, dword[unit_size]	;move in the unit size (13)
 	mul	rcx	;multiply together so eax is value of row in bytes
 	shl	rcx, 1	;double rcx to non half value (printable chars count)
 	mov	edx, eax	;store eax for later (row width)
 	mov	ebx, dword[screen_size]	;move the screen size in bytes into ebx
+	add	ebx, 11
 	sub	ebx, eax	;subtract eax from that, so last line start in ebx
 	add	ebx, 4 + TOP_SIZE	;add 5 (offset for first middle char)
 	mov	eax, dword[screen_size]	;moves screen size in bytes into eax
+	add	eax, 11
 	add	eax, TOP_SIZE - 1
 	mov	r14, "╰"	;start
 	mov	r13, "─"	;middle
