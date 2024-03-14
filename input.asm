@@ -156,10 +156,15 @@ f_translate_camera:
 	fsub	st6
 .end:
 	fst	dword[camera_position+8]	;store new values in camera matrix
+	fabs
+	fchs
+	fst	dword[camera_position_cull+8]	;store negative value here (culling use)
 	fxch	st2
 	fst	dword[camera_position+4]
+	fst	dword[camera_position_cull+4]
 	fxch	st1
 	fst	dword[camera_position]
+	fst	dword[camera_position_cull]
 	emms
 	call	f_pos_string	;generate new location string
 	call	f_insert_location	;move into framebuf

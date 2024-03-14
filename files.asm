@@ -1,9 +1,95 @@
+f_read_tex:
+	push	r8
+	mov	rax, 2
+	mov	rdi, r15
+	xor	rsi, rsi
+	syscall
+	mov	r8, rax
+	xor	rax, rax
+	mov	rdi, r8
+	mov	rsi, filesize
+	mov	rdx, 4
+	syscall
+	mov	eax, dword[filesize]
+	sub	rax, 4
+	mov	rbx, 3
+	mul	rbx
+	add	rax, 4
+	mov	rbx, rax
+	call	f_calc_malloc
+	mov	r9, qword[obj_addr]
+	mov	r10, qword[obj_addr_counter]
+	mov	qword[r9+r10], r12
+	add	qword[obj_addr_counter], 8
+	xor	rax, rax
+	mov	rdi, r8
+	mov	rsi, r12
+	mov	edx, dword[filesize]
+	syscall
+	mov	rcx, rdx
+	mov	r15, [r9+r10]
+.loop:
+	dec	rcx
+	cmp	rcx, 3
+	jz	.end
+	sub	rbx, 3
+	xor	rdx, rdx
+	movzx	rax, byte[r15+rcx]
+	mov	rsi, 10
+	idiv	rsi
+	add	rdx, 48
+	mov	byte[r15+rbx+2], dl
+	xor	rdx, rdx
+	idiv	rsi
+	add	rdx, 48
+	mov	byte[r15+rbx+1], dl
+	xor	rdx, rdx
+	idiv	rsi
+	add	rdx, 48
+	mov	byte[r15+rbx], dl
+	jmp	.loop
+.end:
+	mov	rax, 3
+	mov	rdi, r8
+	syscall
+	pop	r8
+	ret
+f_read_map:
+	push	r8
+	mov	rax, 2
+	mov	rdi, r15
+	xor	rsi, rsi
+	syscall
+	mov	r8, rax
+	xor	rax, rax
+	mov	rdi, r8
+	mov	rsi, filesize
+	mov	rdx, 4
+	syscall
+	mov	eax, dword[filesize]
+	call	f_calc_malloc
+	mov	r9, qword[obj_addr]
+	mov	r10, qword[obj_addr_counter]
+	mov	qword[r9+r10], r12
+	add	qword[obj_addr_counter], 8
+	xor	rax, rax
+	mov	rdi, r8
+	mov	rsi, r12
+	mov	edx, dword[filesize]
+	syscall
+	mov	rax, 3
+	mov	rdi, r8
+	syscall
+	pop	r8
+	ret
 f_read_obj:
+	push	r8
 	mov	rax, 2	;open the file in question
-	mov	rdi, file
+	mov	rdi, r15
 	xor	rsi, rsi	;thats something look it up
 	syscall
 	mov	r8, rax	;save fd
+	push	r8
 	xor	rax, rax	;sys_READ
 	mov	rdi, r8
 	mov	rsi, filesize	;store in here bc thats what first 8 bytes is
@@ -11,13 +97,15 @@ f_read_obj:
 	syscall
 	mov	eax, dword[filesize+4]	;move unpacked size into eax
 	call	f_calc_malloc	;get address for the data to go
-	mov	qword[imported_addr], r12	;r12 is revieved addr
+	mov	r9, qword[obj_addr]
+	mov	r10, qword[obj_addr_counter]
+	mov	qword[r9+r10], r12	;r12 is recieved addr
 	mov	rax, 0	;sys_read
 	mov	rdi, r8	;the file
 	mov	rsi, r12
 	mov	edx, dword[filesize]	;read the size of the file specified (until end)
 	syscall
-	mov	rax, [imported_addr]	;move imported address into rax
+	mov	rax, r12	;move imported address into rax
 	mov	ebx, dword[filesize+4]	;load unpacked data size into ebx
 	sub	rbx, 4	;subtract 4
 	mov	ecx, dword[filesize]	;load packed data size into rcx
@@ -34,9 +122,12 @@ f_read_obj:
 	sub	rcx, 6	;and read data back 3
 	jmp	.load_faces	;load faces again
 .end_faces:
-	mov	qword[imported_addr+8], rax	;save face data start stuff
-	add	qword[imported_addr+8], rbx
-	add	qword[imported_addr+8], 2	;it just moves offset sum into here
+	add	qword[obj_addr_counter], 8
+	mov	r10, qword[obj_addr_counter]
+	mov	qword[r9+r10], rax	;save face data start stuff
+	add	qword[r9+r10], rbx
+	add	qword[r9+r10], 2	;it just moves offset sum into here
+	add	qword[obj_addr_counter], 8
 	sub	rbx, 2	;go back to write some data
 	mov	dword[rax+rbx], 234356	;write end of vertex data sequence
 .load_vertices:
@@ -52,6 +143,198 @@ f_read_obj:
 	jmp	.load_vertices	;otherwise keep going!!!
 .end:
 	mov	dword[rax], 16	;write column size (always 16)
+	pop	r8
+	mov	rax, 3
+	mov	rdi, r8
+	syscall
+	pop	r8
+	ret
+f_read_scene:
+	mov	rax, 2
+	mov	rdi, file
+	xor	rsi, rsi
+	syscall
+	mov	r8, rax
+	xor	rax, rax
+	mov	rdi, r8
+	mov	rsi, obj_count
+	mov	rdx, 2
+	syscall
+	movzx	rax, word[obj_count]
+	mov	rbx, 32
+	mul	rbx
+	call	f_calc_malloc
+	mov	qword[obj_addr], r12
+.read_obj:
+	xor	rax, rax	;sys_read
+	mov	rdi, r8	;read from the file
+	mov	rsi, filesize	;put it in here
+	mov	rdx, 1	;only read 1 byte bc thats how big it is
+	syscall
+	xor	rax, rax	;sys_read
+	mov	rdi, r8	;from the fileeee
+	mov	rsi, files	;put it in the buffer
+	movzx	rdx, byte[filesize]	;read this amount (total size)
+	syscall
+	dec	rdx	;now it points to the last byte of the file
+	movzx	rbx, byte[files+rdx]	;move the last byte into rbx
+	push	rbx	;and save it to the stack
+	mov	byte[files+rdx], 0	;move a 0 into position
+	lea	r15, [files]	;move the address of file data into r15
+	call	f_read_obj	;and then read the object at this point
+.get_uv_start:
+	inc	r15	;increase r15
+	cmp	byte[r15-1], 0	;if you are at a 0 byte, then u have reached the next segment
+	jz	.read_uv	;read uv if yes
+	jmp	.get_uv_start	;otherwise keep going
+.read_uv:
+	call	f_read_map
+.get_tex_start:
+	inc	r15	;same thing but it checks for texture bits
+	cmp	byte[r15-1], 0
+	jz	.read_tex
+	jmp	.get_tex_start
+.read_tex:
+	call	f_read_tex
+	pop	rbx	;pop back last byte of file sequence
+	cmp	rbx, 1	;if it was 1, keep reading objects
+	mov	byte[buf2], 60
+	jz	.read_obj	;yep
+.read_operation:
+	xor	rax, rax	;sys_read
+	mov	rdi, r8	;read from file
+	mov	rsi, buf1	;put it in here
+	mov	rdx, 1	;read 1 byte
+	syscall
+	cmp	byte[buf1], 0
+	jz	.read_variable
+	cmp	byte[buf1], 1	;check if first byte is 1
+	jz	.read_translate	;if yes its a translation action
+.end:
+	mov	rax, 3
+	mov	rdi, r8
+	syscall
+	ret
+.read_variable:
+	xor	rax, rax
+	mov	rdi, r8
+	mov	rsi, buf1
+	mov	rdx, 1
+	syscall
+	cmp	byte[buf1], 0
+	jz	.var_sky_colour
+.var_sky_colour:
+	xor	rax, rax
+	mov	rdi, r8
+	mov	rsi, sky_colour
+	mov	rdx, 3
+	syscall
+	jmp	.read_operation
+.read_translate:
+	xor	rax, rax
+	mov	rdi, r8
+	mov	rsi, buf1
+	mov	rdx, 14
+	syscall
+	mov	eax, dword[buf1+2]
+	mov	dword[translation], eax
+	mov	eax, dword[buf1+6]
+	mov	dword[translation+4], eax
+	mov	eax, dword[buf1+10]
+	mov	dword[translation+8], eax
+	call	f_translation_matrix
+	movzx	rax, word[buf1]
+	mov	rbx, 32
+	mul	rbx
+	mov	rbx, qword[obj_addr]
+	mov	rcx, qword[rbx+rax]
+	push	r13
+	mov	r15, rcx
+	lea	r14, [matrix_translate]
+	lea	r13, [obj_aux_1]
+	call	f_multiply_matrix
+	lea	r15, [obj_aux_1]
+	mov	r14, rcx
+	call	f_copy_matrix
+	pop	r13
+	jmp	.read_operation
+f_write_scene:
+	mov	rax, 2
+	mov	rdi, file
+	mov	rsi, 0b1001000010	 
+	mov	rdx, 0q777
+	syscall
+	mov	r8, rax
+	mov	rax, 1
+	mov	rdi, r8
+	mov	rsi, r14
+	mov	rdx, 2
+	syscall
+	xor	r9, r9
+	xor	rax, rax
+.get_length:
+	cmp	byte[r15+rax], 1	;check if at end of data segment
+	jz	.write_segment	;if yes, write segment
+	cmp	byte[r15+rax], 10	;check if at end of string completely
+	jz	.segment_end	;if so, then write segment but flag r9
+	inc	rax	;otherwise increase rax
+	jmp	.get_length	;and go to next bit in the string
+.segment_end:
+	mov	r9, 1	;mark r9 as being at end of string
+.write_segment:
+	inc	rax	;increase rax so that it is the length of data to write rather than offset
+	push	rax	;push rax bc its used at some point
+	mov	byte[filesize], al	;move rax into filesize
+	mov	rax, 1	;sys_write
+	mov	rdi, r8	;write to file
+	mov	rsi, filesize	;filesize
+	mov	rdx, 1	;which is just 1 byte
+	syscall
+	pop	rax	;pop back rax, which is now length to write
+	mov	rdx, rax	;move it into length arg
+	mov	rax, 1	;sys_write again
+	mov	rdi, r8	;write to fileeee
+	mov	rsi, r15	;and write stuff in r15
+	syscall
+	xor	rax, rax	;rax is now 0
+	add	r15, rdx	;add offset to r15
+	cmp	r9, 1	;check if r9 is 1 (end of string)
+	jnz	.get_length	;if no, continue
+.file_end:
+	cmp	byte[r13], 255
+	jz	.end
+	cmp	byte[r13], 0
+	jz	.write_variable
+	cmp	byte[r13], 1
+	jz	.write_translation
+.write_variable:
+	cmp	byte[r13+1], 0
+	jz	.write_sky_colour
+.write_sky_colour:
+	mov	rax, 1
+	mov	rdi, r8
+	mov	rsi, r13
+	mov	rdx, 5
+	syscall
+	add	r13, 5
+	jmp	.file_end
+.write_translation:
+	mov	rax, 1
+	mov	rdi, r8
+	mov	rsi, r13
+	mov	rdx, 15
+	syscall
+	add	r13, 15
+	jmp	.file_end
+.end:
+	mov	rax, 1
+	mov	rdi, r8
+	mov	rsi, r13
+	mov	rdx, 1
+	syscall
+	mov	rax, 3
+	mov	rdi, r8
+	syscall
 	ret
 f_write_tex:
 	mov	rax, 2	;system call for open!!
@@ -64,6 +347,12 @@ f_write_tex:
 	mov	rdi, r8
 	mov	rsi, filesize
 	mov	rdx, 4	;what matters is that its 4 bytes
+	syscall
+	mov	r9, 4	;u write image dimensions first
+	mov	rax, 1	;wite again wowee no way
+	mov	rdi, r8
+	mov	rsi, r14	;except write image dimensions
+	mov	rdx, 4	;its only 2 words so 4 bytes is fine
 	syscall
 .write_loop:
 	movzx	rcx, byte[r15+rbx+2]	;lsBYTE not bit in rcx
@@ -78,7 +367,7 @@ f_write_tex:
 	mov	rax, 100	;except 100 this time
 	mul	rdx
 	add	rcx, rax	;and add still (this converts an ascii 3 digit to integer)
-	mov	byte[buf1], al	;move into a buffer
+	mov	byte[buf1], cl	;move into a buffer
 	mov	rax, 1	;write again
 	mov	rdi, r8
 	mov	rsi, buf1	;write result of mathy thing
@@ -90,12 +379,6 @@ f_write_tex:
 	add	rbx, 3	;else add 3 to go to next string
 	jmp	.write_loop	;loop also
 .finish:
-	mov	rax, 1	;wite again wowee no way
-	mov	rdi, r8
-	mov	rsi, r14	;except write image dimensions
-	mov	rdx, 4	;its only 2 words so 4 bytes is fine
-	syscall
-	add	r9, 4	;increase data counter again
 	mov	rax, 8	;lseek to beginning yk the drill
 	mov	rdi, r8
 	xor	rsi, rsi
@@ -166,9 +449,6 @@ f_write_obj:
 	mov	rsi, filesize	;filesize is at this point arbitrary, it just reserves space
 	mov	rdx, 8	;8 bytes reserve (for unpacked size also)
 	syscall
-	fld	dword[r15+8]
-	fld	dword[r15+4]
-	fld	dword[r15]
 .write_coords:
 	mov	rax, 1	;sys_write again (lots of this)
 	mov	rdi, r8	;yep

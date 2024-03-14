@@ -3,10 +3,10 @@
 	fld	dword[vertex_attr+%1]	;load v0 u coord
 	fmul	st1	;multiply
 	fld	dword[barycentric+4]	;load barycentric v coord
-	fld	dword[vertex_attr+12+%1]	;and v1 u coord
+	fld	dword[vertex_attr+16+%1]	;and v1 u coord
 	fmul	st1	;guess what comes next
 	fld	dword[barycentric+8]	;its just this but over again
-	fld	dword[vertex_attr+24+%1]
+	fld	dword[vertex_attr+32+%1]
 	fmul	st1
 	fadd	st2	;takes the sum of all of these
 	fadd	st4
@@ -25,18 +25,22 @@
 	fist	dword[triangle+%1*8+4]
 	lea	r8, [camera_position]	;distance from camera position
 	call	f_euclidean_distance	;get depth
+	fld	dword[vertex_dist]	;load distance here
+	fld1	;load 1 to get reciprocal of euclidean distance
+	fdiv	st1	;divide by this thing
+	fst	dword[vertex_attr+%1*16+12]	;and store here
 	fld	dword[vertex_depth]	;load depth
 	fld1	;and load 1
 	fdiv	st1	;recpirocal of vertex_depth
-	fst	dword[vertex_attr+%1*12+8]	;store in third position
+	fst	dword[vertex_attr+%1*16+8]	;store in third position
 	sub	rax, 4	;remove 16 offset
 	shr	rax, 1	;and half to get uv position
 	fld	dword[r12+rax]	;load u coord
 	fdiv	st2	;divide by depth
-	fst	dword[vertex_attr+%1*12]	;store in position 1
+	fst	dword[vertex_attr+%1*16]	;store in position 1
 	fld	dword[r12+rax+4]	;do the same with v coord
 	fdiv	st3
-	fst	dword[vertex_attr+%1*12+4]
+	fst	dword[vertex_attr+%1*16+4]
 	emms
 %endmacro
 f_map_texture:
@@ -74,6 +78,11 @@ f_map_texture:
 	interpolate_uvd	0	;interpolate u
 	interpolate_uvd	4	;interpolate v
 	interpolate_uvd	8	;interpolate d
+	interpolate_uvd	12	;interpolate dist
+	fld	dword[interpolated_uvd+12]
+	fld1
+	fdiv	st1
+	fst	dword[point_depth]
 	fld	dword[interpolated_uvd+8]	;load depth reciprocal
 	fld1	;load 1
 	fdiv	st1	;reciprocal of reciprocal is non reciprocal interpolated depth
@@ -87,8 +96,9 @@ f_map_texture:
 	push	rax	;push values used in image sampling
 	push	r15
 	push	r13
-	lea	r13, [dimensions]	;use dimensions of image here
-	lea	r15, [cube_texture]
+	mov	r13, [imported_addr+24]	;use dimensions of image here
+	mov	r15, [imported_addr+24]	;textures here
+	add	r15, 4	;4 offset
 	call	f_sample_image	;sample uv
 	mov	rdi, rax	;move position of sampled data into rdi
 	pop	r13
@@ -177,47 +187,33 @@ f_cull_backfaces:
 	mov	rdi, r15	;saves these bc r15 and r14 are used as source and destination holders
 	mov	rsi, r14	;yep
 	mov	rcx, rdx	;saves rdx to rcx for some reason that cannot remember probably a good idea
-	lea	r13, [edge_vector_a]	;destination
+	lea	r13, [edge_vector_a]	;destination (aligned)
 	call	f_edge_vector	;get edge vector (uses rcx as offset)
 	add	rcx, 2	;next line in poly
-	lea	r13, [edge_vector_b]	;same same
+	lea	r13, [edge_vector_b]	;same same (aligned)
 	call	f_edge_vector
 	sub	rcx, 2	;restore value of c
 	lea	r15, [edge_vector_a]	;cross product this matrix
 	lea	r14, [edge_vector_b]	;with this one
 	lea	r13, [cross_product]	;and store here!
-	call	f_cross_product
+	call	f_cross_product	;all args must be aligned to 16 bytes
 	movzx	r9, word[rsi+rcx]	;moves index of line into r9
 	mov	rax, 16	;multiply val
 	mul	r9	;multiply together, get offset of first index and result in rax
-	fld	dword[camera_position]	;load camera position X
-	fld	dword[rdi+rax+4]	;and vertex position X
-	fsub	st1	;subtract camera X from vertex X
-	fst	dword[edge_vector_a]	;store here
-	fld	dword[camera_position+4]	;do the same for other dimensions
-	fld	dword[rdi+rax+8]
-	fsub	st1
-	fst	dword[edge_vector_a+4]
-	fld	dword[camera_position+8]
-	fabs
-	fchs
-	fld	dword[rdi+rax+12]
-	fsub	st1
-	fst	dword[edge_vector_a+8]
-	emms	;clear stack
-	fld	dword[edge_vector_a]	;load camera vector
-	fld	dword[cross_product]	;load the cross product
-	fmul	st1	;multiply them together (dot product stage)
-	fld	dword[edge_vector_a+4]	;do the same with Y vals
-	fld	dword[cross_product+4]
-	fmul	st1
-	fld	dword[edge_vector_a+8]	;and Z vals
-	fld	dword[cross_product+8]
-	fmul	st1
-	fadd	st2	;then add them all together
-	fadd	st4
+	movaps	xmm1, [camera_position_cull]	;move culled camera position into xmm1
+	movups	xmm0, [rdi+rax+4]	;and move in value for camera position
+	subps	xmm0, xmm1	;calculate vector
+	movaps	xmm1, [cross_product]	;move in cross product to xmm1
+	mulps	xmm0, xmm1	;then start dot product of cross product and camera vertex vector
+	movaps	xmm1, xmm0	;clone xmm0 to xmm1
+	shufps	xmm1, xmm0, 0b00000001 ;and rerange xmm1
+	addss	xmm0, xmm1	;add scalars together
+	movaps	xmm1, xmm0	;same again
+	shufps	xmm1, xmm0, 0b00000010	;but use third value
+	addss	xmm0, xmm1	;add scalars
+	movss	[edge_vector_b], xmm0	;and store here
 	fldz	;load zero
-	fxch	;swap so the dot product is in st0 and 0 is in st1
+	fld	dword[edge_vector_b]	;load dot product
 	xor	r8, r8	;reset r8 bc its used to see if line is negative or not
 	fcom	st1	;compare dot product with 0
 	fstsw	ax	;move status words into rax
@@ -236,25 +232,31 @@ f_cull_backfaces:
 	pop	rax
 	emms	;clear stack
 	ret
+f_clear_screen:
+	xor	rcx, rcx	;xor register used for screen resetting offset
+	xor	rbx, rbx	;reset rbx
+	mov	rdx, [framebuf]	;load frame buffer
+.loop_reset:
+	cmp	byte[rdx+rcx+TOP_SIZE+13], 27	;checks if current char is escape
+	jnz	.end_reset	;if no, dont reset bc its part of ui
+	mov	dword[depth_buffer+rbx], 1287568416	;float for very large negative value
+	mov	ax, word[sky_colour]	;otherwise move sky color into rax
+	mov	word[rdx+rcx+7+TOP_SIZE], ax	;and move it into current escape
+	mov	al, byte[sky_colour+2]	;same but with last byte
+	mov	byte[rdx+rcx+9+TOP_SIZE], al	;yep
+	add	rcx, 13	;increase rcx by 13 (unit size)
+	add	rbx, 4	;increase depth buf counter
+	jmp	.loop_reset	;loop over
+.end_reset:
+	mov	word[rdx+rcx+7+TOP_SIZE], "23"	;move in black escape into text box thingy
+	mov	byte[rdx+rcx+9+TOP_SIZE], "2"
+	ret
 f_node_screen:
 	push	rax	;push registers
 	push	rbx	;...
 	push	rcx	;..
 	push	rdx	;.
-	xor	rcx, rcx	;xor register used for screen resetting offset
-	mov	rdx, [framebuf]	;load frame buffer
-.loop_reset:
-	cmp	ecx, dword[screen_size]	;checks if offset is same as screen size in bytes
-	jz	.end_reset	;if yes, finished resetting
-	cmp	byte[rdx+rcx+TOP_SIZE], 27	;checks if current char is escape
-	jnz	.no_set	;if no, dont reset bc its part of ui
-	mov	word[rdx+rcx+7+TOP_SIZE], "23"	;otherwise, set the colour of the pixel to black
-	mov	byte[rdx+rcx+9+TOP_SIZE], "2"	;232
-.no_set:
-	add	rcx, 13	;increase rcx by 13 (unit size)
-	jmp	.loop_reset	;loop over
-.end_reset:
-	xor	rcx, rcx	;reset rcx bc its used for screen offset also
+	xor	rcx, rcx
 .loop:
 	cmp	dword[r15+rcx+4], 234356	;check if at end
 	jz	.draw_lines	;if yes, go to end part
@@ -345,6 +347,22 @@ f_draw_point:
 	push	rcx	;push some registers
 	push	rdx	;..
 	push	rax	;.
+	push	rax	;push these AGAIN??
+	push	rbx
+	mul	word[window_size+2]	;get position but in depth buf
+	shl	rax, 2	;multiply by 4 ouh
+	shl	rbx, 2	;shifts beloved
+	add	rbx, rax
+	fld	dword[depth_buffer+rbx]	;load depth buffer position
+	fld	dword[point_depth]	;load depth of current point
+	fcom	st1	;compare!!!!
+	fstsw	ax	;blahhh
+	sahf
+	ja	.not_draw	;if point depth is above, its further away so dont draw
+	fst	dword[depth_buffer+rbx]	;otherwise overwrite it
+	emms
+	pop	rbx
+	pop	rax
 	mov	eax, ebx	;move ebx (width) into eax	
 	mul	dword[unit_size]	;and multiply by unit size
 	mov	ecx, eax	;and move that into ecx
@@ -361,6 +379,15 @@ f_draw_point:
 	pop	rcx	;...
 	pop	rbx	;..
 	pop	rax	;.
+	ret
+.not_draw:
+	pop	rbx	;"googy" - lusii probably
+	pop	rax
+	pop	rax
+	pop	rdx
+	pop	rcx
+	pop	rbx
+	pop	rax
 	ret
 f_draw_line:
 	push	r15	;god damn
@@ -614,30 +641,30 @@ f_generate_row:
 	pop	rax
 	ret
 f_extrude_point:
-	push	r15
-	add	r15, 4
-	mov	rbx, 16
-	mul	rbx
-	add	r15, rax
-	fld	dword[center_coords+8]
+	push	r15	;push r15 for use in future operations
+	add	r15, 4	;adds 4 to skip the 16 at start
+	mov	rbx, 16	;move 16 into rbx (column width)
+	mul	rbx	;multiply it by vertex index
+	add	r15, rax	;add this to r15 so you have the write coords
+	fld	dword[center_coords+8]	;load the center coords
 	fld	dword[center_coords+4]
 	fld	dword[center_coords]
-	fld	dword[r15+8]
-	fsub	st3
-	fld	dword[r15+4]
+	fld	dword[r15+8]	;load z coord
+	fsub	st3	;subtract center z coords from it
+	fld	dword[r15+4]	;do the same but with y and x coords 
 	fsub	st3
 	fld	dword[r15]
 	fsub	st3
-	fld	dword[operation_multiplier]
-	fmul	TO	st1
+	fld	dword[operation_multiplier]	;load the multiplier for extrusion
+	fmul	TO	st1	;and multiply all of the subtracted points by it
 	fmul	TO	st2
 	fmulp	st3
-	fadd	st3
+	fadd	st3	;then add back the center coords to all coords
 	fstp	dword[r15]
 	fadd	st3
 	fstp	dword[r15+4]
 	fadd	st3
 	fstp	dword[r15+8]
-	emms
-	pop	r15
+	emms	;and ur done wasnt that easy
+	pop	r15	;pop back for future
 	ret

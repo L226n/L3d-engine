@@ -94,29 +94,26 @@ f_get_bounding:
 	pop	rcx
 	ret
 f_euclidean_distance:
-	fld	dword[r13+rax]	;load object space coords
-	fld	dword[r8]	;and load point to compare with
-	fsub	st1	;subtract object space coords from point
-	fld	st0	;duplicate value
-	fmul	st1	;and multiply by itself (squared)
-	fst	dword[buf1]	;store in buffer 1
-	emms	;stack cant hold all values so reset it
-	fld	dword[r13+rax+4]	;load same values
-	fld	dword[r8+4]	;but y coords not x
-	fsub	st1
-	fld	st0
-	fmul	st1	;u dont have to store after this
-	fld	dword[r13+rax+8]	;same thing but with z coords
-	fld	dword[r8+8]
-	fsub	st1
+	mov	edx, dword[matrix_ndc+rax+8]	;load the uh yeah
+	mov	dword[vertex_depth], edx
+	movups	xmm0, [r13+rax]	;vertex position into xmm0
+	movups	xmm1, [r8]	;camera position into xmm1
+	subps	xmm1, xmm0	;then subtract the vertex positions from the camera
+	movups	[buf1], xmm0	;store in this buffer
+	fld	dword[buf1]	;load first dword
+	fld	st0	;load it again
+	fmul	st1	;and multiply by itself to square it
+	fld	dword[buf1+4]	;do this with all values
 	fld	st0
 	fmul	st1
-	fld	dword[buf1]	;load the x value
-	fadd	st1	;add them all together
-	fadd	st4	;yeah
-	fsqrt	;and square root it
-	fst	dword[vertex_depth]	;store in vertex depth
-	emms
+	fld	dword[buf1+8]
+	fld	st0
+	fmul	st1
+	fadd	st2
+	fadd	st4
+	fsqrt	;square root it
+	fst	dword[vertex_dist]	;and store here
+	emms	;easy with SIMD!
 	ret
 f_sample_image:
 	push	rbx	;push	registers (return is rax soooo no rax)
@@ -146,60 +143,36 @@ f_sample_image:
 f_barycentric_coords:
 	push	rax
 	push	rbx
-	mov	eax, dword[triangle+8]	;this bit calculates vectors between different points
-	sub	eax, dword[triangle]	;in this case its between point B and point A
-	mov	dword[bc_vectors], eax	;store this as vector 0
-	mov	eax, dword[triangle+12]	;the above was for X, now this is for Y
-	sub	eax, dword[triangle+4]	;still point B and A
-	mov	dword[bc_vectors+4], eax
-	mov	eax, dword[triangle+16]	;this is now X position for point C and A
-	sub	eax, dword[triangle]
-	mov	dword[bc_vectors+8], eax
-	mov	eax, dword[triangle+20]	;and Y position for point C and A
-	sub	eax, dword[triangle+4]
-	mov	dword[bc_vectors+12], eax
-	mov	eax, dword[point]	;now its different, its between point P and A
-	sub	eax, dword[triangle]	;(X position)
-	mov	dword[bc_vectors+16], eax
-	mov	eax, dword[point+4]	;Y position for P to A
-	sub	eax, dword[triangle+4]
-	mov	dword[bc_vectors+20], eax
-	mov	eax, dword[bc_vectors]	;now calculate dot product of V0 and V0
-	mul	eax	;multiply it by itself
-	mov	dword[dot_products], eax	;and store as d00
-	mov	eax, dword[bc_vectors+4]	;load Y positions instead
-	mul	eax	;multiply by itself again
-	add	dword[dot_products], eax	;add to other thing
-	mov	eax, dword[bc_vectors]	;same thing for dot product of V0 and V1
-	mov	ebx, dword[bc_vectors+8]	;except this multiplies by different (V1) values
-	mul	ebx
-	mov	dword[dot_products+4], eax	;store as d01
-	mov	eax, dword[bc_vectors+4]	;now Y pos
-	mov	ebx, dword[bc_vectors+12]
-	mul	ebx
-	add	dword[dot_products+4], eax
-	mov	eax, dword[bc_vectors+8]	;this is now d11
-	mul	eax
-	mov	dword[dot_products+8], eax	;d11 position
-	mov	eax, dword[bc_vectors+12]
-	mul	eax
-	add	dword[dot_products+8], eax
-	mov	eax, dword[bc_vectors+16]	;this is now d02
-	mov	ebx, dword[bc_vectors]
-	mul	ebx
-	mov	dword[dot_products+12], eax	;d02 position
-	mov	eax, dword[bc_vectors+20]
-	mov	ebx, dword[bc_vectors+4]
-	mul	ebx
-	add	dword[dot_products+12], eax
-	mov	eax, dword[bc_vectors+16]	;and finally this is now d12
-	mov	ebx, dword[bc_vectors+8]
-	mul	ebx
-	mov	dword[dot_products+16], eax	;d12 position
-	mov	eax, dword[bc_vectors+20]
-	mov	ebx, dword[bc_vectors+12]
-	mul	ebx
-	add	dword[dot_products+16], eax
+	movdqu	xmm0, [triangle+8]	;calculate vectors between different points
+	movdqa	xmm1, [triangle]	;move ALIGNED DATA into xmm1
+	pshufd	xmm1, xmm1, 0b01000100	;then shuffle it so its now like [0, 1, 0, 1]
+	psubd	xmm0, xmm1	;this is between point B and A
+	movdqa	[bc_vectors], xmm0	;save result and this bit is aligned so u can save time prehaps
+	movdqa	xmm0, [point]	;move point into xmm reg
+	psubd	xmm0, xmm1	;then reuse xmm1 bc its okay!
+	movdqa	[bc_vectors+16], xmm0	;store here
+	movdqa	xmm0, [bc_vectors]	;move vectors v0 and v1 into xmm0
+	pmulld	xmm0, xmm0	;multiply them
+	pshufd	xmm1, xmm0, 0b00110001	;and then move the second values in each vector calc to align with first vals
+	paddd	xmm0, xmm1	;add them together
+	movd	[dot_products], xmm0	;store this as dot product d00
+	pshufd	xmm0, xmm0, 0b00000010	;shuffle to get other dot product
+	movd	[dot_products+8], xmm0	;and store this as dot product d11
+	movdqa	xmm0, [bc_vectors]	;this time v0 and v1 are still used
+	movdqa	xmm1, [bc_vectors+16]	;but it also uses v2
+	pshufd	xmm1, xmm1, 0b01000100	;here it duplicates v2 x and y to highest qword
+	pmulld	xmm0, xmm1	;multiply!
+	pshufd	xmm1, xmm0, 0b00110001	;same with the value aligning thingy
+	paddd	xmm0, xmm1	;add them together
+	movd	[dot_products+12], xmm0	;and store as d20
+	pshufd	xmm0, xmm0, 0b00000010
+	movd	[dot_products+16], xmm0	;and d21
+	movdqa	xmm0, [bc_vectors]	;last time! use v0
+	movdqu	xmm1, [bc_vectors+8]	;and v1
+	pmulld	xmm0, xmm1	;multiply them
+	pshufd	xmm1, xmm0, 0b00000001	;align values
+	paddd	xmm0, xmm1	;and get sum
+	movd	[dot_products+4], xmm0	;store as d01
 	mov	eax, dword[dot_products]	;rax is now d00
 	mov	ebx, dword[dot_products+8]	;and rbx d11
 	mul	ebx	;multiply them by each other
@@ -236,36 +209,21 @@ f_barycentric_coords:
 	fst	dword[barycentric]	;and the result is u
 	emms
 	xor	r8, r8	;reset r8 (triangle bounds calculator)
-	fldz	;load 0 and 1
-	fld1
-	fld	dword[barycentric]	;and u coord
-	fcom	st1	;check against 1
-	fstsw	ax
-	sahf
-	ja	.outside	;if its higher, its outside triangle
-	fcom	st2	;compare with 0
-	fstsw	ax
-	sahf
-	jb	.outside	;if its lower, its also outside
-	fld	dword[barycentric+4]	;do the same for v coords
-	fcom	st2
-	fstsw	ax
-	sahf
-	ja	.outside
-	fcom	st3
-	fstsw	ax
-	sahf
-	jb	.outside
-	fld	dword[barycentric+8]	;and w coords
-	fcom	st3
-	fstsw	ax
-	sahf
-	ja	.outside
-	fcom	st4
-	fstsw	ax
-	sahf
-	jb	.outside
-	jmp	.end	;skip r8 setting
+.check:
+	movups	xmm0, [barycentric]
+	movups	xmm1, [simd_zeros]
+	cmpnltps	xmm1, xmm0
+	movmskps	ebx, xmm0
+	movups	xmm0, [barycentric]
+	movups	xmm1, [simd_ones]
+	cmpnltps	xmm0, xmm1
+	xor	rax, rax
+	movmskps	eax, xmm1
+	add	eax, ebx
+	and	al, 0b00000111
+	cmp	eax, 0
+	jz	.end
+	jmp	.outside
 .outside:
 	inc	r8	;increase r8 to show that outside triangle
 .end:
@@ -274,56 +232,29 @@ f_barycentric_coords:
 	pop	rax
 	ret
 f_cross_product:
-	fld	dword[r15+4]	;the cross product is weird and uses an odd formula
-	fld	dword[r14+8]	;but its easy to program so thats ok
-	fmul	st1	;its p much just multiply 2 values an sub from each other
-	fld	dword[r15+8]	;yep
-	fld	dword[r14+4]
-	fmul	st1
-	fsubr st2
-	fst	dword[r13]
-	fld	dword[r15+8]
-	fld	dword[r14]
-	fmul	st1
-	fld	dword[r15]
-	fld	dword[r14+8]
-	fmul	st1
-	fsubr st2
-	fst	dword[r13+4]
-	emms
-	fld	dword[r15]
-	fld	dword[r14+4]
-	fmul	st1
-	fld	dword[r15+4]
-	fld	dword[r14]
-	fmul	st1
-	fsubr st2
-	fst	dword[r13+8]
-	emms
-	ret
+	movaps	xmm0, [r15]	;load A struct into xmm0
+	movaps	xmm2, xmm0	;and xmm2 bah
+	movaps	xmm1, [r14]	;now load B struct into xmm1
+	movaps	xmm3, xmm1	;duplicate into xmm3
+	shufps	xmm2, xmm2, 0b00010010	;rearange stuff
+	shufps	xmm0, xmm0, 0b00001001	;not very interesting
+	shufps	xmm3, xmm3, 0b00001001
+	shufps	xmm1, xmm1, 0b00010010
+	mulps	xmm0, xmm1	;multiply stuff together
+	mulps	xmm2, xmm3
+	subps	xmm0, xmm2	;and do the subtraction
+	movaps	[r13], xmm0	;then store it
+	ret	;done! wasnt that easy :3
 f_edge_vector:
 	mov	rbx, 16	;multiplication value
 	movzx	rax, word[r14+rcx]	;get value at index
 	mul	rbx	;multiply!
-	fld	dword[r15+rax+4]	;get value at index again + 4
-	fld	dword[r15+rax+8]	;+8
-	fld	dword[r15+rax+12]	;guess
+	movups	xmm0, [r15+rax+4]
 	movzx	rax, word[r14+rcx+2]	;use second value at index
 	mul	rbx	;and do p much the same thing
-	fld	dword[r15+rax+4]
-	fld	dword[r15+rax+8]
-	fld	dword[r15+rax+12]
-	fsub	st3	;subtract Ax from Bx
-	fxch	st1	;Ay from By
-	fsub	st4	;Az from Bz
-	fxch	st2
-	fsub	st5
-	fst	dword[r13]	;aaand then ur done
-	fxch	st2	;just put the thingies in the right place
-	fst	dword[r13+4]
-	fxch	st1
-	fst	dword[r13+8]
-	emms
+	movups	xmm1, [r15+rax+4]
+	subps	xmm1, xmm0
+	movaps	[r13], xmm1
 	ret
 f_float_ascii:
 	fstcw	word[cw]	;stores current control word in cw
@@ -454,9 +385,9 @@ f_calc_malloc:
 	push	r10
 	push	r9
 	push	r8
+	push	rax	;push rax (requested memory)
 	cmp	rax, qword[mem_available]	;check if needed memory is less than available (no allocation)
 	jbe	.no_allocate	;if its below or equal, then no allocation is needed
-	push	rax	;push rax (requested memory)
 	xor	rbx, rbx	;reset page counter
 .loop:
 	add	rbx, 4096	;always allocate at least 1 page if memory isnt available
@@ -466,7 +397,7 @@ f_calc_malloc:
 	jmp	.loop	;else loop over
 .no_allocate:
 	mov	rbx, qword[last_memory]	;move last memory place into rbx
-	mov	r12, rbx	;move that into r11 (returns place to write)
+	mov	r12, rbx	;move that into r12 (returns place to write)
 	add	qword[last_memory], rax	;add rax into last memory position (requested size)
 	sub	qword[mem_available], rax	;subtract requested size from available memory
 	pop	rax
@@ -485,9 +416,10 @@ f_calc_malloc:
 	mov	qword[reserved_memory+rcx], rax	;move address into deallocation table
 	mov	qword[reserved_memory+rcx+8], rbx	;and size
 	add	word[reserved_pos], 16	;add 16 to the counter (2 qwords)
+	mov	rbx, rax
+	pop	rax	;get back requested size 
 	add	rax, rbx	;add the requested size to mem addr
 	mov	qword[last_memory], rax	;moves that into last memory pos
-	pop	rax	;get back requested size 
 	mov	qword[mem_available], rbx	;move allocated size into memory counter
 	sub	qword[mem_available], rax	;then subtract size used
 .end:

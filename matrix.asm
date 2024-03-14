@@ -62,6 +62,8 @@ f_multiply_matrix:
 	pop	rax	;.
 	ret
 f_normalise_matrix:
+	;!!!NOTE!!! normalised z coord is calculated
+	;and un-normalised is stored in an ndc matrix!!
 	push	rax	;push used register
 	xor	rax, rax	;reset rax
 .loop:
@@ -69,8 +71,9 @@ f_normalise_matrix:
 	jz	.end	;if yes, go to end
 	add	rax, 16	;otherwise add column length to rax (next row)
 	fld	dword[r15+rax]	;load W value
-	fld	dword[r15+rax-4]	;load Z value
-	fdiv	st1	;divide Z by W
+	fld	dword[r15+rax-4]	;load Y value
+	fst	dword[matrix_ndc+rax-4]	;store non-normalised val
+	fdiv	st1	;divide Y by W
 	fst	dword[r15+rax-4]	;store new value
 	fld	dword[r15+rax-8]	;load Y value
 	fdiv	st2	;divide Y by W
@@ -104,6 +107,25 @@ f_camera_rotation_matrix:
 	mov	dword[matrix_camera_rotate+28], eax
 	mov eax, dword[matrix_fwd+12]
 	mov	dword[matrix_camera_rotate+44], eax
+	ret
+f_copy_matrix:
+	xor	rbx, rbx
+.loop:
+	mov	eax, dword[r15+rbx]
+	mov	dword[r14+rbx], eax
+	cmp	eax, 234356
+	jz	.end
+	add	rbx, 4
+	jmp	.loop
+.end:
+	ret
+f_translation_matrix:
+	mov	eax, dword[translation]
+	mov	dword[matrix_translate+52], eax
+	mov	eax, dword[translation+4]
+	mov	dword[matrix_translate+56], eax
+	mov	eax, dword[translation+8]
+	mov	dword[matrix_translate+60], eax
 	ret
 f_rotate_matrix_x:
 	fld	dword[r15]	;loads the angle to rotate by
@@ -206,18 +228,18 @@ f_update_camera_axis:
 	call	f_rotate_matrix_y
 	lea	r15, [matrix_rotation_x]	;use rotation_x
 	lea	r14, [matrix_rotation_y]	;and rotation_y
-	lea	r13, [cube2]	;store in this buffer
+	lea	r13, [obj_aux_1]	;store in this buffer
 	call	f_multiply_matrix	;and multiply them together
 	lea	r15, [matrix_fwd_2]	;multiply blank fwd matrix
-	lea	r14, [cube2]	;by multiplied rotation matrix
+	lea	r14, [obj_aux_1]	;by multiplied rotation matrix
 	lea	r13, [matrix_fwd]	;and store in original one
 	call	f_multiply_matrix	;go
 	lea	r15, [matrix_up_2]	;do the same for the other ones
-	lea	r14, [cube2]
+	lea	r14, [obj_aux_1]
 	lea	r13, [matrix_up]
 	call	f_multiply_matrix
 	lea	r15, [matrix_right_2]
-	lea	r14, [cube2]
+	lea	r14, [obj_aux_1]
 	lea	r13, [matrix_right]
 	call	f_multiply_matrix
 	ret
