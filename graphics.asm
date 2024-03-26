@@ -25,11 +25,8 @@
 	fist	dword[triangle+%1*8+4]
 	lea	r8, [camera_position]	;distance from camera position
 	call	f_euclidean_distance	;get depth
-	fld	dword[vertex_dist]	;load distance here
-	fld1	;load 1 to get reciprocal of euclidean distance
-	fdiv	st1	;divide by this thing
-	fst	dword[vertex_attr+%1*16+12]	;and store here
 	fld	dword[vertex_depth]	;load depth
+	fst	dword[vertex_attr+%1*16+12]	;and store here
 	fld1	;and load 1
 	fdiv	st1	;recpirocal of vertex_depth
 	fst	dword[vertex_attr+%1*16+8]	;store in third position
@@ -43,6 +40,110 @@
 	fst	dword[vertex_attr+%1*16+4]
 	emms
 %endmacro
+f_process_translations:
+	mov	byte[aux_counter], 0	;reset auxiliary counter
+	mov	rdx, qword[mainloop]	;move mainloop addr into rdx
+	mov	rax, qword[translation_index]	;move translation index into rax
+	movzx	rbx, byte[obj_counter]	;and obj counter
+.loop:
+	cmp	word[rdx+rax], bx	;if obj counter is not equal to translation counter end
+	jnz	.end
+	cmp	byte[rdx+rax+2], 0	;if its 0 then condition is always, jump regardless
+	jz	.transform
+.transform:
+	mov	r13, obj_aux_0	;store addr here
+	cmp	byte[aux_counter], 0	;if aux counter is 0 then
+	jz	.skip	;DONT set this
+	mov	r13, obj_aux_1	;use this if its not 0
+.skip:
+	not	byte[aux_counter]	;byte complement this guy
+	cmp	byte[rdx+rax+3], 0	;check this guy (so many guys not much gender diversity)
+	jz	.set_position	;if its 0 then set position
+	cmp	byte[rdx+rax+3], 1	;if its 1
+	jz	.rotate	;then itsrotation
+	cmp	byte[rdx+rax+3], 2
+	jz	.translate_func
+.set_position:
+	movups	xmm0, [rdx+rax+4]	;move coords into here
+	movaps	[translation], xmm0	;and store here
+	push	rax	;push rax
+	call	f_translation_matrix	;make a translation matrix
+	pop	rax	;pop rax
+	mov	r15, qword[imported_addr]	;thennnn vertex data
+	lea	r14, [matrix_translate]	;mul by translation
+	call	f_multiply_matrix	;multiply!!!!!!
+	mov	qword[imported_addr], r13	;store result
+	add	rax, 16	;add data length
+	jmp	.loop	;and keep checking
+.rotate:
+	fld	dword[rdx+rax+5]	;load increment val for rotation
+	fld	dword[rdx+rax+9]	;and current val
+	fadd	st1	;add the increment to current
+	fst	dword[rdx+rax+9]	;and store here
+	emms
+	lea	r15, [rdx+rax+9]	;load this addr into r15
+	cmp	byte[rdx+rax+4], 0	;check the axis (0 is x, y=1 and z=2)
+	jz	.rotate_x
+	cmp	byte[rdx+rax+4], 1
+	jz	.rotate_y
+.rotate_z:
+	call	f_rotate_matrix_z	;rotate around z using r15 as angle
+	mov	r15, qword[imported_addr]	;then do the normal
+	lea	r14, [matrix_rotation_z]
+	call	f_multiply_matrix
+	mov	qword[imported_addr], r13	;and store
+	jmp	.rotate_step_end	;goto end
+.rotate_y:
+	call	f_rotate_matrix_y	;same but with y rotation
+	mov	r15, qword[imported_addr]
+	lea	r14, [matrix_rotation_y]
+	call	f_multiply_matrix
+	mov	qword[imported_addr], r13
+	jmp	.rotate_step_end
+.rotate_x:
+	call	f_rotate_matrix_x	;and x rotation
+	mov	r15, qword[imported_addr]
+	lea	r14, [matrix_rotation_x]
+	call	f_multiply_matrix
+	mov	qword[imported_addr], r13
+.rotate_step_end:
+	add	rax, 13	;add offset
+	jmp	.loop	;loop over!
+.translate_func:
+	fld	dword[rdx+rax+17]	;load increment
+	fld	dword[rdx+rax+21]	;and current val
+	fadd	st1	;add so it increases
+	fst	dword[rdx+rax+21]	;and store back!
+	cmp	byte[rdx+rax+4], 0	;check operation values to use
+	jz	.translate_sin	;and go to appropriate case
+	cmp	byte[rdx+rax+4], 1
+	jz	.translate_cos
+.return:
+	fst	dword[buf1]	;store computed value in buf1
+	emms	;reset stack
+	movaps	xmm0, [buf1]	;load computed val into xmm0
+	shufps	xmm0, xmm0, 0b00000000	;then shuffle so every value is dword[buf1]
+	movups	xmm1, [rdx+rax+5]	;move the translation into xmm1
+	mulps	xmm0, xmm1	;and multiply them together
+	movaps	[translation], xmm0	;move this into translation thingy
+	push	rax	;push rax
+	call	f_translation_matrix	;make a translation matrix
+	pop	rax	;pop rax
+	mov	r15, qword[imported_addr]	;thennnn vertex data
+	lea	r14, [matrix_translate]	;mul by translation
+	call	f_multiply_matrix	;multiply!!!!!!
+	mov	qword[imported_addr], r13	;store result
+	add	rax, 25	;add data length
+	jmp	.loop	;and keep checking
+.translate_sin:
+	fsin	;if only switch cases existed in nasm
+	jmp	.return
+.translate_cos:
+	fcos
+	jmp	.return
+.end:
+	mov	qword[translation_index], rax ;and store index of translation
+	ret
 f_map_texture:
 	push	rcx	;push rcx bc its important to stay the same
 	sub	rcx, 2	;decrease so it points to value before delimiter
@@ -79,10 +180,8 @@ f_map_texture:
 	interpolate_uvd	4	;interpolate v
 	interpolate_uvd	8	;interpolate d
 	interpolate_uvd	12	;interpolate dist
-	fld	dword[interpolated_uvd+12]
-	fld1
-	fdiv	st1
-	fst	dword[point_depth]
+	mov	r8d, dword[interpolated_uvd+12]
+	mov	dword[point_depth], r8d
 	fld	dword[interpolated_uvd+8]	;load depth reciprocal
 	fld1	;load 1
 	fdiv	st1	;reciprocal of reciprocal is non reciprocal interpolated depth
@@ -236,13 +335,17 @@ f_clear_screen:
 	xor	rcx, rcx	;xor register used for screen resetting offset
 	xor	rbx, rbx	;reset rbx
 	mov	rdx, [framebuf]	;load frame buffer
+	lea	r15, [sky_colour]
+	cmp	byte[wireframe], 0
+	jz	.loop_reset
+	lea	r15, [black_ansi]
 .loop_reset:
 	cmp	byte[rdx+rcx+TOP_SIZE+13], 27	;checks if current char is escape
 	jnz	.end_reset	;if no, dont reset bc its part of ui
 	mov	dword[depth_buffer+rbx], 1287568416	;float for very large negative value
-	mov	ax, word[sky_colour]	;otherwise move sky color into rax
+	mov	ax, word[r15]	;otherwise move sky color into rax
 	mov	word[rdx+rcx+7+TOP_SIZE], ax	;and move it into current escape
-	mov	al, byte[sky_colour+2]	;same but with last byte
+	mov	al, byte[r15+2]	;same but with last byte
 	mov	byte[rdx+rcx+9+TOP_SIZE], al	;yep
 	add	rcx, 13	;increase rcx by 13 (unit size)
 	add	rbx, 4	;increase depth buf counter
@@ -280,12 +383,17 @@ f_node_screen:
 	add	rcx, 2	;otherwise increase rcx (counter) by 2
 	jmp	.line_loop	;and check again
 .draw_poly:
+	cmp	byte[culling], 0	;why do u feel like this
+	jz	.dont_cull	;heeelpppppp
 	call	f_cull_backfaces	;cull backfaces
 	cmp	r8, 0	;if val is 0, then the face isnt valid
 	jz	.dont_draw	;if val is 1, then draw the face
+.dont_cull:
+	cmp	byte[wireframe], 0	;for no reason maybe vignette is dying or smth
+	jz	.no_wireframe	;either way it feels like amalgamation of ideas masquerading as some1
+	jmp	.cont_draw	;when ur no one, something
+.no_wireframe:
 	call	f_map_texture
-	;mov	rdx, 101
-	;call	f_kill
 .dont_draw:
 	add	rcx, 2	;add 2 to rcx for next value
 	mov	rdx, rcx	;move rcx to rdx so backface culling doesnt get sad
@@ -305,9 +413,9 @@ f_node_screen:
 	mul	rbx	;same same
 	mov	rbx, qword[r15+rax+4]
 	mov	qword[line_end], rbx	;but line end now
-	call	f_check_visible	;check if face is visible
-	cmp	r8, 2	;if it isnt,
-	jz	.dont_draw_1	;go to loop over
+	;call	f_check_visible	;check if face is visible
+	;cmp	r8, 2	;if it isnt,
+	;jz	.dont_draw_1	;go to loop over
 	call	f_draw_line	;draw the line
 .dont_draw_1:
 	sub	rcx, 2	;decrease rcx by 2, so that it draws lines between the previous 2 points
@@ -327,9 +435,10 @@ f_node_screen:
 	mul	rbx	;multiply by 16
 	mov	rbx, qword[r15+rax+4]
 	mov	qword[line_end], rbx	;line end thingy
-	call	f_check_visible	;check if face is visible
-	cmp	r8, 2
-	jz	.dont_draw_2	;if not then yeah
+	;call	f_check_visible	;check if face is visible
+	;cmp	r8, 2
+	;jz	.dont_draw_2	;if not then yeah
+	;these are commented bc they are stupid
 	call	f_draw_line	;draws the line
 .dont_draw_2:
 	add	rcx, 2	;adds 2 to rcx, so it now points to the first value of next poly
@@ -337,6 +446,28 @@ f_node_screen:
 	jmp	.line_loop	;loop over
 .end:
 	pop	rdx	;pop back registers
+	pop	rcx	;...
+	pop	rbx	;..
+	pop	rax	;.
+	ret
+f_draw_ui:
+	push	rax	;push position registers
+	push	rbx
+	push	rcx	;push some registers
+	push	rdx	;..
+	push	rax	;.
+	mov	eax, ebx	;move ebx (width) into eax	
+	mul	dword[unit_size]	;and multiply by unit size
+	mov	ecx, eax	;and move that into ecx
+	pop	rax	;pop back height
+	mul	word[window_size+2]	;multiply by half screen width
+	mul	dword[unit_size]	;and unit size
+	add	eax, ecx	;add the two together
+	mov	rcx, [framebuf]	;move the shared memory framebuffer into rcx
+	mov	word[rcx+rax+7+TOP_SIZE], "19"	;and move escapes for color
+	mov	byte[rcx+rax+9+TOP_SIZE], "6"	;move colour
+	mov	word[rcx+rax+11+TOP_SIZE], r8w
+	pop	rdx	;....
 	pop	rcx	;...
 	pop	rbx	;..
 	pop	rax	;.
@@ -472,7 +603,19 @@ f_draw_line:
 	jnz	.draw	;if no, (horizontal) draw
 	xchg	rax, rbx	;else, swap draw co-ords
 .draw:
+	push	rdi
+	lea	rdi, [white_ansi]
+	cmp	rax, 0
+	jl	.skip_draw
+	cmp	rbx, 0
+	jl	.skip_draw
+	cmp	ax, word[available_window]
+	jae	.skip_draw
+	cmp	bx, word[window_size+2]
+	jae	.skip_draw
 	call	f_draw_point	;draw the point
+.skip_draw:
+	pop	rdi
 	pop	rbx	;get back rbx and rax
 	pop	rax	;.
 	fldz	;load 0 val

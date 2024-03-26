@@ -109,7 +109,7 @@ f_camera_rotation_matrix:
 	mov	dword[matrix_camera_rotate+44], eax
 	ret
 f_copy_matrix:
-	xor	rbx, rbx
+	xor	rbx, rbx	;crazy complex insane code
 .loop:
 	mov	eax, dword[r15+rbx]
 	mov	dword[r14+rbx], eax
@@ -120,7 +120,7 @@ f_copy_matrix:
 .end:
 	ret
 f_translation_matrix:
-	mov	eax, dword[translation]
+	mov	eax, dword[translation]	;wow how could this work 🤔🤔 
 	mov	dword[matrix_translate+52], eax
 	mov	eax, dword[translation+4]
 	mov	dword[matrix_translate+56], eax

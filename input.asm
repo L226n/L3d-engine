@@ -8,6 +8,8 @@ f_input_cases:
 	mov	rbx, [framebuf]	;move the frame buffer space into rbx for later
 	cmp	byte[rax], 27	;checks if byte of polling space is 27
 	jz	.escape	;if yes, escape sequence (arrows)
+	cmp	byte[paused], 0	;if paused dont process movement
+	jnz	.ret
 	cmp	byte[rax], "w"	;check if byte is w
 	jz	case_w	;if yes, go to the w case
 	cmp	byte[rax], "s"	;do this for every key there is to grab
@@ -20,8 +22,11 @@ f_input_cases:
 	jz	case_q
 	cmp	byte[rax], "e"
 	jz	case_e
+.ret:
 	ret
 .escape:
+	cmp	byte[paused], 0	;only check for f keys so you can actually unpause
+	jnz	.check_fkeys
 	cmp	word[rax+1], "[D"	;arrow keys are weird and sent odd escapes
 	jz	.case_left	;this one is left
 	cmp	word[rax+1], "[C"
@@ -30,7 +35,104 @@ f_input_cases:
 	jz	.case_up
 	cmp	word[rax+1], "[B"
 	jz	.case_down
+.check_fkeys:
+	cmp	word[rax+1], "OP"	;wow like the alphabet P Q R S
+	jz	.case_f1
+	cmp	word[rax+1], "OQ"
+	jz	.case_f2
+	cmp	word[rax+1], "OR"
+	jz	.case_f3
+	;cmp	word[rax+1], "OS"
+	;jz	.case_f4
 	ret	;return if it was smth like escape key
+.case_f3:
+	not	byte[alert_end]	;set alert end byte
+	call	f_clear_alert	;clear previous alert thing
+	not	byte[culling]	;toggle culling
+	cmp	byte[culling], 0	;check if culling is to be enabled
+	jnz	.enable_culling	;if it is do that
+	mov	dword[message], "[Cul"	;boring
+	mov	dword[message+4], "ling"
+	mov	dword[message+8], " dis"
+	mov	dword[message+12], "able"
+	mov	word[message+16], "d]"
+	mov	byte[message+18], 0	;end of string
+	mov	ax, word[screen_x_center]	;move in screen center
+	sub	ax, 5	;decrease by 5 (half of msg length)
+	mov	word[alert_x_offset], ax	;stoooooooooooooooore here
+	mov	qword[alert_tick], 120	;ticks for the message to stay for
+	mov	byte[alerted], 255	;set the alerted byte
+	ret
+.enable_culling:
+	mov	dword[message], "[Cul"	;same thing but other things yyyyyyk so bored
+	mov	dword[message+4], "ling"
+	mov	dword[message+8], " ena"
+	mov	dword[message+12], "bled"
+	mov	word[message+16], " ]"
+	mov	byte[message+18], 0
+	mov	ax, word[screen_x_center]
+	sub	ax, 5
+	mov	word[alert_x_offset], ax
+	mov	qword[alert_tick], 120
+	mov	byte[alerted], 255
+	ret
+.case_f2:
+	not	byte[alert_end]
+	call	f_clear_alert
+	not	byte[wireframe]
+	cmp	byte[wireframe], 0
+	jz	.no_wireframe
+	mov	dword[message], "[Wir"
+	mov	dword[message+4], "efra"
+	mov	dword[message+8], "me e"
+	mov	dword[message+12], "nabl"
+	mov	dword[message+16], "ed ]"
+	mov	byte[message+20], 0
+	mov	ax, word[screen_x_center]
+	sub	ax, 5
+	mov	word[alert_x_offset], ax
+	mov	qword[alert_tick], 120
+	mov	byte[alerted], 255
+	ret
+.no_wireframe:
+	mov	dword[message], "[Wir"
+	mov	dword[message+4], "efra"
+	mov	dword[message+8], "me d"
+	mov	dword[message+12], "isab"
+	mov	dword[message+16], "led]"
+	mov	byte[message+20], 0
+	mov	ax, word[screen_x_center]
+	sub	ax, 5
+	mov	word[alert_x_offset], ax
+	mov	qword[alert_tick], 120
+	mov	byte[alerted], 255
+	ret
+.case_f1:
+	not	byte[alert_end]
+	call	f_clear_alert
+	not	byte[paused]
+	cmp	byte[paused], 0
+	jz	.unpause
+	mov	dword[message], "[Pau"
+	mov	dword[message+4], "sed]"
+	mov	byte[message+8], 0
+	mov	ax, word[screen_x_center]
+	sub	ax, 2
+	mov	word[alert_x_offset], ax
+	mov	qword[alert_tick], -1
+	mov	byte[alerted], 255
+	ret
+.unpause:
+	mov	dword[message], "[Unp"
+	mov	dword[message+4], "ause"
+	mov	word[message+8], "d]"
+	mov	byte[message+10], 0
+	mov	ax, word[screen_x_center]
+	sub	ax, 3
+	mov	word[alert_x_offset], ax
+	mov	qword[alert_tick], 120
+	mov	byte[alerted], 255
+	ret
 .case_left:
 	mov	ecx, dword[keys_space]	;move the keys space offset into ecx
 	call	f_shift_keys	;shift the keys over 1 space

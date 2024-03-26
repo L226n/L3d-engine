@@ -120,10 +120,12 @@ f_sample_image:
 	push	rcx
 	fild	word[r13]	;load image size x
 	fld	dword[interpolated_uvd]	;load uv coords x
+	fabs	;get absolute value, prevents some crashes
 	fmul	st1	;multiply together to get cartesian coords
 	fist	dword[interpolated_uvd]	;store back in uv coords bc they are interpolated anyway
 	fild	word[r13+2]	;do the same but with y positions
 	fld	dword[interpolated_uvd+4]
+	fabs	;same here
 	fmul	st1
 	fist	dword[interpolated_uvd+4]
 	emms	;reset stack
@@ -209,7 +211,6 @@ f_barycentric_coords:
 	fst	dword[barycentric]	;and the result is u
 	emms
 	xor	r8, r8	;reset r8 (triangle bounds calculator)
-.check:
 	movups	xmm0, [barycentric]
 	movups	xmm1, [simd_zeros]
 	cmpnltps	xmm1, xmm0

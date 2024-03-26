@@ -1,6 +1,6 @@
 f_read_tex:
-	push	r8
-	mov	rax, 2
+	push	r8	;push r8 bc its used in other important places
+	mov	rax, 2	;open file
 	mov	rdi, r15
 	xor	rsi, rsi
 	syscall
@@ -8,79 +8,79 @@ f_read_tex:
 	xor	rax, rax
 	mov	rdi, r8
 	mov	rsi, filesize
-	mov	rdx, 4
+	mov	rdx, 4	;read filesize
 	syscall
-	mov	eax, dword[filesize]
-	sub	rax, 4
+	mov	eax, dword[filesize]	;move into rax
+	sub	rax, 4	;subtract 4
 	mov	rbx, 3
-	mul	rbx
-	add	rax, 4
-	mov	rbx, rax
+	mul	rbx	;multiply by 3
+	add	rax, 4	;and then add 4 again
+	mov	rbx, rax	;this calculates how much memory to reserve (dword+expanded data)
 	call	f_calc_malloc
-	mov	r9, qword[obj_addr]
-	mov	r10, qword[obj_addr_counter]
-	mov	qword[r9+r10], r12
-	add	qword[obj_addr_counter], 8
-	xor	rax, rax
+	mov	r9, qword[obj_addr]	;move addr of object stuff into r9
+	mov	r10, qword[obj_addr_counter]	;move addr counter into r10
+	mov	qword[r9+r10], r12	;store addr in good place
+	add	qword[obj_addr_counter], 8	;increase counter by 1 qword
+	xor	rax, rax	;read
 	mov	rdi, r8
-	mov	rsi, r12
-	mov	edx, dword[filesize]
+	mov	rsi, r12	;store in reserved memory
+	mov	edx, dword[filesize]	;read all rest of file
 	syscall
-	mov	rcx, rdx
-	mov	r15, [r9+r10]
+	mov	rcx, rdx	;store length in rcx
+	mov	r15, [r9+r10]	;move addr into r15
 .loop:
-	dec	rcx
-	cmp	rcx, 3
-	jz	.end
-	sub	rbx, 3
-	xor	rdx, rdx
-	movzx	rax, byte[r15+rcx]
-	mov	rsi, 10
-	idiv	rsi
-	add	rdx, 48
-	mov	byte[r15+rbx+2], dl
-	xor	rdx, rdx
-	idiv	rsi
+	dec	rcx	;decrease rcx (position counter)
+	cmp	rcx, 3	;check if its 3 (at end (but really start) of thing)
+	jz	.end	;if yes die
+	sub	rbx, 3	;decrease string counter by 3
+	xor	rdx, rdx	;reset rdx
+	movzx	rax, byte[r15+rcx]	;move number into rax
+	mov	rsi, 10	;10 into rsi
+	idiv	rsi	;divide number by 10
+	add	rdx, 48	;convert remainder to ascii
+	mov	byte[r15+rbx+2], dl	;and store
+	xor	rdx, rdx	;yep
+	idiv	rsi	;same with everything else
 	add	rdx, 48
 	mov	byte[r15+rbx+1], dl
 	xor	rdx, rdx
 	idiv	rsi
 	add	rdx, 48
 	mov	byte[r15+rbx], dl
-	jmp	.loop
+	jmp	.loop	;looop over
 .end:
 	mov	rax, 3
 	mov	rdi, r8
 	syscall
-	pop	r8
+	pop	r8	;POP BACK
 	ret
 f_read_map:
-	push	r8
-	mov	rax, 2
-	mov	rdi, r15
+	push	r8	;you again.... its been soup wgagf
+	mov	rax, 2	;blehhhhhhhhhhhhhhhhh too silly for this
+	mov	rdi, r15	;yk what this does already sleeping emoji
 	xor	rsi, rsi
 	syscall
 	mov	r8, rax
 	xor	rax, rax
 	mov	rdi, r8
 	mov	rsi, filesize
-	mov	rdx, 4
+	mov	rdx, 4	;maybe should write a macro for this stuff cant be botheredd tho
 	syscall
 	mov	eax, dword[filesize]
-	call	f_calc_malloc
-	mov	r9, qword[obj_addr]
+	call	f_calc_malloc	;bc its stored as raw data u dont have to calculate different vals
+	mov	r9, qword[obj_addr]	;its very easy
 	mov	r10, qword[obj_addr_counter]
 	mov	qword[r9+r10], r12
 	add	qword[obj_addr_counter], 8
-	xor	rax, rax
-	mov	rdi, r8
+	xor	rax, rax	;wow ok this was stupid
+	mov	rdi, r8	;extremely basic non interesting function
 	mov	rsi, r12
 	mov	edx, dword[filesize]
 	syscall
 	mov	rax, 3
 	mov	rdi, r8
 	syscall
-	pop	r8
+	pop	r8	;not much to say for this one
 	ret
 f_read_obj:
 	push	r8
@@ -150,7 +150,7 @@ f_read_obj:
 	pop	r8
 	ret
 f_read_scene:
-	mov	rax, 2
+	mov	rax, 2	;easy stuff
 	mov	rdi, file
 	xor	rsi, rsi
 	syscall
@@ -158,13 +158,13 @@ f_read_scene:
 	xor	rax, rax
 	mov	rdi, r8
 	mov	rsi, obj_count
-	mov	rdx, 2
+	mov	rdx, 2	;read object amount
 	syscall
 	movzx	rax, word[obj_count]
 	mov	rbx, 32
-	mul	rbx
+	mul	rbx	;get space needed for storing addresses of object attributes
 	call	f_calc_malloc
-	mov	qword[obj_addr], r12
+	mov	qword[obj_addr], r12	;store here
 .read_obj:
 	xor	rax, rax	;sys_read
 	mov	rdi, r8	;read from the file
@@ -210,56 +210,67 @@ f_read_scene:
 	jz	.read_variable
 	cmp	byte[buf1], 1	;check if first byte is 1
 	jz	.read_translate	;if yes its a translation action
+.read_mainloop:
+	xor	rax, rax	;read
+	mov	rdi, r8
+	mov	rsi, filesize
+	mov	rdx, 4	;read the dword which says how large the mainloop data is
+	syscall
+	mov	eax, dword[filesize]	;move this into eax (rax is bytes read so it shouldnt go into extension)
+	call	f_calc_malloc	;get some space reserved
+	mov	qword[mainloop], r12	;and store it here
+	xor	rax, rax	;readdddddddd
+	mov	rdi, r8
+	mov	rsi, r12	;store it in new memory
+	mov	edx, dword[filesize]	;read length of data
+	syscall	;yay
 .end:
 	mov	rax, 3
 	mov	rdi, r8
 	syscall
 	ret
 .read_variable:
-	xor	rax, rax
+	xor	rax, rax	;read again
 	mov	rdi, r8
 	mov	rsi, buf1
-	mov	rdx, 1
+	mov	rdx, 1	;read byte of variable id
 	syscall
-	cmp	byte[buf1], 0
-	jz	.var_sky_colour
+	cmp	byte[buf1], 0	;if its 0
+	jz	.var_sky_colour	;then set sky colour
 .var_sky_colour:
-	xor	rax, rax
+	xor	rax, rax	;then read data toooo
 	mov	rdi, r8
-	mov	rsi, sky_colour
-	mov	rdx, 3
+	mov	rsi, sky_colour	;output here
+	mov	rdx, 3	;3 ascii chars
 	syscall
-	jmp	.read_operation
+	jmp	.read_operation	;looping rn #relatable
 .read_translate:
 	xor	rax, rax
 	mov	rdi, r8
 	mov	rsi, buf1
-	mov	rdx, 14
+	mov	rdx, 14	;read allllll rest of data most of it is coords
 	syscall
-	mov	eax, dword[buf1+2]
-	mov	dword[translation], eax
-	mov	eax, dword[buf1+6]
-	mov	dword[translation+4], eax
-	mov	eax, dword[buf1+10]
-	mov	dword[translation+8], eax
-	call	f_translation_matrix
-	movzx	rax, word[buf1]
-	mov	rbx, 32
-	mul	rbx
-	mov	rbx, qword[obj_addr]
-	mov	rcx, qword[rbx+rax]
+	movups	xmm0, [buf1+2]	;move in coord data to xmm0
+	movaps	[translation], xmm0	;store it in here
+	call	f_translation_matrix	;then generate a translation matrix for it
+	movzx	rax, word[buf1]	;move first word (obj index) into rax
+	mov	rbx, 32	;multiply by 32 (length of all addresses stored
+	mul	rbx	;get index
+	mov	rbx, qword[obj_addr]	;addr of place where obj data is stored
+	mov	rcx, qword[rbx+rax]	;move the addr for object coords into rcx
 	push	r13
-	mov	r15, rcx
-	lea	r14, [matrix_translate]
-	lea	r13, [obj_aux_1]
-	call	f_multiply_matrix
-	lea	r15, [obj_aux_1]
-	mov	r14, rcx
+	mov	r15, rcx	;put that in r15 (source)
+	lea	r14, [matrix_translate]	;multiply by translation
+	lea	r13, [obj_aux_1]	;store in some aux
+	call	f_multiply_matrix	;go
+	lea	r15, [obj_aux_1]	;copy data from here
+	mov	r14, rcx	;to here
 	call	f_copy_matrix
 	pop	r13
 	jmp	.read_operation
 f_write_scene:
-	mov	rax, 2
+	push	r12	;push r12 bc its call clobered
+	mov	rax, 2	;cmon now
 	mov	rdi, file
 	mov	rsi, 0b1001000010	 
 	mov	rdx, 0q777
@@ -301,37 +312,58 @@ f_write_scene:
 	cmp	r9, 1	;check if r9 is 1 (end of string)
 	jnz	.get_length	;if no, continue
 .file_end:
-	cmp	byte[r13], 255
-	jz	.end
-	cmp	byte[r13], 0
-	jz	.write_variable
-	cmp	byte[r13], 1
-	jz	.write_translation
+	cmp	byte[r13], 255	;check if at end of init stuff
+	jz	.write_mainloop	;if yes go to END
+	cmp	byte[r13], 0	;check if current byte is 0
+	jz	.write_variable	;if yes its a variable set
+	cmp	byte[r13], 1	;if its 1
+	jz	.write_translation	;then its a translation
 .write_variable:
-	cmp	byte[r13+1], 0
-	jz	.write_sky_colour
+	cmp	byte[r13+1], 0	;check if variable id is 0 (sky col)
+	jz	.write_sky_colour	;yeah
 .write_sky_colour:
-	mov	rax, 1
+	mov	rax, 1	;write some stuff
 	mov	rdi, r8
-	mov	rsi, r13
-	mov	rdx, 5
+	mov	rsi, r13	;in particular the sky colour ascii val
+	mov	rdx, 5	;its 5 bytes (includes operation and var id bytes)
 	syscall
-	add	r13, 5
-	jmp	.file_end
+	add	r13, 5	;increase by 5!!
+	jmp	.file_end	;then go to file end and loop over
 .write_translation:
-	mov	rax, 1
+	mov	rax, 1	;writing rn
 	mov	rdi, r8
 	mov	rsi, r13
-	mov	rdx, 15
+	mov	rdx, 15	;use 15 bc its length of all translation stuffs
 	syscall
-	add	r13, 15
-	jmp	.file_end
+	add	r13, 15	;increase again
+	jmp	.file_end	;and loop
+.write_mainloop:
+	mov	rax, 1	;writes last byte of init data to file
+	mov	rdi, r8
+	mov	rsi, r13
+	mov	rdx, 1	;its 255 btw
+	syscall
+	pop	r12	;pop back uhhhhhhhhh mainloop data
+	xor	rax, rax	;reset rax bc it will be a counter
+.mainloop_loop:
+	cmp	word[r12+rax], -1	;check if current word is signaling end
+	jz	.mainloop_end	;if yes done
+	inc	rax	;otherwise increase (end could be at odd interval)
+	jmp	.mainloop_loop	;looooooooop
+.mainloop_end:
+	add	rax, 2	;increase by 2 to include end in write
+	mov	dword[filesize], eax	;move this value into filesize dword
+	mov	rax, 1	;and write this data to the file
+	mov	rdi, r8
+	mov	rsi, filesize
+	mov	rdx, 4	;its a dword
+	syscall
+	mov	rax, 1	;then write the mainloop data
+	mov	rdi, r8
+	mov	rsi, r12	;addr of data
+	mov	edx, dword[filesize]	;and length of data
+	syscall
 .end:
-	mov	rax, 1
-	mov	rdi, r8
-	mov	rsi, r13
-	mov	rdx, 1
-	syscall
 	mov	rax, 3
 	mov	rdi, r8
 	syscall

@@ -5,6 +5,7 @@
 %include	"clock.asm"
 %include	"poll.asm"
 %include	"files.asm"
+%include	"gui.asm"
 ;external files
 section	.data
 	TOP_SIZE	equ	4
@@ -26,7 +27,8 @@ section	.data
 	matrix_right_2	dd	16, 1.0, 0.0, 0.0, 1.0, 234356
 	camera_pitch	dd	0.0
 	camera_yaw	dd	0.0
-	translation	dd	0, 0, 0
+	align	16
+	translation	dd	0, 0, 0, 0
 	matrix_camera	times 18	dd	0.0
 	;matrix labels
 	camera_h_fov	dd	1.0471975511965976
@@ -45,17 +47,18 @@ section	.data
 	;and this is the negative version
 	obj_matrix	dd	16, -0.5, -0.5, -0.5, 1.0, 0.5, -0.5, -0.5, 1.0, -0.5, 0.5, -0.5, 1.0, 0.5, 0.5, -0.5, 1.0, -0.5, -0.5, 0.5, 1.0, 0.5, -0.5, 0.5, 1.0, -0.5, 0.5, 0.5, 1.0, 0.5, 0.5, 0.5, 1.0, 234356
 	obj_faces	dw	0, 1, 2, 65534, 3, 2, 1, 65534, 2, 3, 6, 65534, 7, 6, 3, 65534, 3, 1, 5, 65534, 7, 3, 5, 65534, 1, 0, 4, 65534, 4, 5, 1, 65534, 0, 2, 4, 65534, 4, 2, 6, 65534, 4, 7, 5, 65534, 4, 6, 7, 65534, 65535
-	obj_uv	dd	1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 234356
-	obj_texture	db	"200", "200", "200", "200", "200", "200", "200", "200"
-			db	"200", "177", "177", "177", "177", "177", "177", "200"
-			db	"200", "177", "200", "177", "177", "200", "177", "200"
-			db	"200", "177", "177", "177", "177", "177", "177", "200"
-			db	"200", "177", "200", "177", "177", "200", "177", "200"
-			db	"200", "177", "177", "200", "200", "177", "177", "200"
-			db	"200", "177", "177", "177", "177", "177", "177", "200"
-			db	"200", "200", "200", "200", "200", "200", "200", "200"
+	obj_uv	dd	0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 234356
+	obj_texture	db	"239", "239", "239", "239", "239", "239", "239", "239"
+			db	"239", "244", "244", "244", "244", "244", "244", "239"
+			db	"239", "244", "244", "244", "244", "244", "244", "239"
+			db	"239", "244", "244", "244", "244", "244", "244", "239"
+			db	"239", "244", "244", "244", "244", "244", "244", "239"
+			db	"239", "244", "244", "244", "244", "244", "244", "239"
+			db	"239", "244", "244", "244", "244", "244", "244", "239"
+			db	"239", "239", "239", "239", "239", "239", "239", "239"
 	dimensions	dw	8, 8
 	;these are matrices for a cube
+	obj_aux_0	times 34	dd	0.0
 	obj_aux_1	times 34	dd	0.0
 	obj_aux_2	times 34	dd	0.0
 	matrix_ndc	times 34	dd	0.0
@@ -66,6 +69,7 @@ section	.data
 	;buffer for screen size
 	unit_size	dd	13
 	;size of a unit
+	align	16
 	buf1	dd	0, 0, 0, 0
 	buf2	dd	0
 	buf3	dd	0
@@ -109,7 +113,7 @@ section	.data
 	;fpu control word
 	file_separator	dw	65535
 	;separator between 1 and 0
-	file	db	"fish.lsc", 0, "xxxxxxxxxxxxxxxxxxxxxxx"
+	file	db	"test.lsc", 0, "xxxxxxxxxxxxxxxxxxxxxxx"
 	;file path
 	filesize	dq	0
 	;size of file data
@@ -120,48 +124,121 @@ section	.data
 	reserved_pos	dw	0
 	;position in reserved memory buffer
 	imported_addr	dq	0, 0, 0, 0
+	;place to store address of all the object stuff for current iteration
+	mainloop	dq	0
+	;place to store address of mainloop info
+	translation_index	dq	0
+	;index of mainloop to continue back from
 	center_coords	dd	0.0, 0.0, 0.0
+	;coords for point extrusion maybe other stuff in future
 	operation_multiplier	dd	2.0
+	;multiplier for point extrusion
 	vertex_depth	dd	0.0
+	;used in texture mapping for storing depth of vertex
 	vertex_dist	dd	0.0
 	bounding_box	dd	0, 0, 0, 0
+	;also texture mapping to get the box in which a triangle exists
 	interpolated_uvd	dd	0, 0, 0
-	scene_meta	db	"fish.l3d", 0, "fish.luv", 0, "fish.ltx", 1, "ground.l3d", 0, "ground.luv", 0, "ground.ltx", 1, "cube.l3d", 0, "cube.luv", 0, "cube.ltx", 10
-	obj_count	dw	3
+	;pretty easy
+	scene_meta	db	"fish.l3d", 0, "fish.luv", 0, "fish.ltx", 1, "ground.l3d", 0, "ground.luv", 0, "ground.ltx", 1, "cube.l3d", 0, "cube.luv", 0, "cube.ltx", 1, "tetrapod.l3d", 0, "tetrapod.luv", 0, "tetrapod.ltx", 10
+	obj_count	dw	4
 	init_info	db	0
 			db	0
 			db	"075"
 			db	1
-			dw	0
-			dd	3.0, 0.5, 3.0
+			dw	1
+			dd	0.0, 0.0, 5.0
 			db	1
 			dw	2
 			dd	0.0, 0.5, 3.0
 			db	1
-			dw	1
-			dd	0.0, 0.0, 5.0
+			dw	3
+			dd	-1.0, 1.5, 7.0
 			db	255
 	obj_addr	dq	0
+	;address holder for allll object info thats alot
 	obj_addr_counter	dq	0
+	;counter for where u are in the thing
 	obj_counter	db	0
-	point_depth	dd	0
+	;counts which object ur iterating over
+	point_depth	dd	-1.0
+	;holds depth of point to be passed to depth buffer
 	sky_colour	db	"232"
+	;guess what
 	align	16
 	triangle	dd	0, 0, 0, 0, 0, 0
+	;stores triangle points
 	align	16
 	bc_vectors	dd	0, 0, 0, 0, 0, 0, 0, 0
+	;stores vectors used in barycentric calcs
 	align	16
 	point	dd	0, 0
+	;another thing used for barycentrics
 	align	16
 	edge_vector_a	dd	0, 0, 0, 0
+	;temporary buffers tbh
 	align	16
 	edge_vector_b	dd	0, 0, 0, 0
 	align	16
 	cross_product	dd	0, 0, 0, 0
+	;used to store cross products
 	align	16
 	simd_ones	dd	1.0, 1.0, 1.0, 1.0
 	align	16
 	simd_zeros	dd	0.0, 0.0, 0.0, 0.0
+	;these 2 are used for counters
+	aux_counter	db	0
+	;this is to count which aux buffers to use in which order
+	;however it doesnt seem like it changes anything so for now it does nothing
+	message_clear	db	"  "
+	alerted	db	0
+	alert_tick	dq	0
+	alert_end	db	0
+	alert_y_offset	dw	0
+	screen_x_center	dw	0
+	alert_x_offset	dw	0
+	paused	db	0
+	wireframe	db	0
+	culling	db	255
+	white_ansi	db	"231"
+	black_ansi	db	"232"
+	second	dq	1000000000
+	timer:
+		timer_seconds	dq	0
+		timer_nanoseconds	dq	0
+	mainloop_info:
+		dw	0	;object index (fish)
+		db	0	;transformation condition (always)
+		db	1	;transformation type (rotation)
+		db	1	;rotation axis (y)
+		dd	0.1	;rotation increment 
+		dd	0.0	;current rotation
+		dw	0	;another object index again it is a FISH
+		db	0	;condition is always
+		db	0	;set position
+		dd	3.0, 0.7, 3.0	;position to set
+		dw	0
+		db	0
+		db	2	;translate with function (+3)
+		db	0	;function to use (sin) (+4)
+		dd	0.0, 0.3, 0.0	;translation (+5)
+		dd	0.1	;function increment (+17)
+		dd	0.0	;current value to pass to function (+21)
+		dw	3
+		db	0
+		db	2	;translate with function (+3)
+		db	0	;function to use (sin) (+4)
+		dd	1.0, 0.0, 0.0	;translation (+5)
+		dd	0.2	;function increment (+17)
+		dd	0.0	;current value to pass to function (+21)
+		dw	3
+		db	0
+		db	2	;translate with function (+3)
+		db	1	;function to use (cos) (+4)
+		dd	0.0, 0.0, 1.0	;translation (+5)
+		dd	0.2	;function increment (+17)
+		dd	0.0	;current value to pass to function (+21)
+		dw	-1	;end
 section	.bss
 	termios:
 		c_iflag	resd	1
@@ -185,10 +262,11 @@ section	.bss
 	vertex_attr	resd	12
 	files	resb	96
 	depth_buffer	resd	38400
+	message	resb	128
 section	.text
 	global	_start
 _start:
-	;lea	r15, [cube_texture]
+	;lea	r15, [obj_texture]
 	;lea	r14, [dimensions]
 	;call	f_write_tex
 	;mov	rdx, 101
@@ -196,6 +274,7 @@ _start:
 	lea	r15, [scene_meta]
 	lea	r14, [obj_count]
 	lea	r13, [init_info]
+	lea	r12, [mainloop_info]
 	call	f_write_scene
 	call	f_read_scene
 	finit	;initialise FPU control words
@@ -238,13 +317,17 @@ _start:
 	mov	rsi, 21523	;TIOCGWINSZ
 	mov	rdx, window_size	;buffer for window size
 	syscall
-	movzx	rax, word[window_size]
-	sub	rax, 3
-	mov	word[available_window], ax
+	movzx	rax, word[window_size]	;move window height into rax
+	sub	rax, 3	;sub 3 to get available window space
+	mov	word[available_window], ax	;
+	sub	rax, 2
+	mov	word[alert_y_offset], ax
 	test	word[window_size+2], 1	;test LSB of rax 
 	jnz	f_kill	;if its a 1 (odd) then kill
 	shr	word[window_size+2], 1
 	movzx	rax, word[window_size+2]	;moves window width into rax
+	mov	word[screen_x_center], ax
+	shr	word[screen_x_center], 1
 	mul	word[window_size]	;multiply window height by width
 	mov	rbx, 13	;then multiplies it by 13 (one unit is 13 bytes)
 	mul	rbx	;actual multiplication
@@ -286,8 +369,17 @@ _start:
 	mov	rsi, buf1	;buffer to store result (discarded)
 	mov	rdx, 1	;length to read (doesnt matter)
 	syscall
-	call	f_clear_screen	;clear screen of old chars and also clear depth buffer
+	cmp	byte[alert_end], 0	;check if alert end is low
+	jz	.skip_clear_alert	;if yes dont do this
+	call	f_clear_alert	;otherwise do what this is
+.skip_clear_alert:
 	call	f_input_cases	;input cases yeah
+	cmp	byte[paused], 0	;check if paused
+	jz	.not_paused	;ugh gonna cry
+	call	f_alert	;sdtill doesnt feel like an actual human being
+	jmp	.loop	;this is so stupid
+.not_paused:
+	call	f_clear_screen	;clear screen of old chars and also clear depth buffer
 	mov	rax, [poll]	;move in polling space
 	cmp	byte[rax], 0	;check if no char is sent
 	jz	.no_input	;if no char, theres no input
@@ -300,11 +392,11 @@ _start:
 	lea	r13, [matrix_camera]	;matrix C is camera matrix (result)
 	call	f_multiply_matrix	;get camera matrix!
 	mov	byte[obj_counter], 0	;reset obj counter
+	mov	qword[translation_index], 0
 .loop_object:
 	movzx	rdx, byte[obj_counter]	;move it into rbx
 	mov	rax, 32	;move in 32 (size of all object addresses)
 	mul	rdx	;multiply it by the object iter
-	inc	byte[obj_counter]	;increase said counter
 	mov	rbx, qword[obj_addr]	;move address of object addresses into rbx
 	mov	rcx, qword[rbx+rax]	;and move address of vertex data into rcx
 	mov	qword[imported_addr], rcx	;save that in vertex data start
@@ -314,6 +406,8 @@ _start:
 	mov	qword[imported_addr+16], rcx
 	mov	rcx, qword[rbx+rax+24]	;object texture
 	mov	qword[imported_addr+24], rcx
+	call	f_process_translations	;forgot what this even does o wait nvm
+	inc	byte[obj_counter]	;increase said counter
 .loop_objects:
 	mov	r15, [imported_addr]	;use object vertices
 	lea	r14, [matrix_camera]	;multiply by new camera matrix
@@ -337,6 +431,11 @@ _start:
 	movzx	rdx, byte[obj_counter]
 	cmp	dx, word[obj_count]	;if its at the end then done process more objects
 	jz	.loop	;finish frame if it is
+	cmp	byte[alerted], 0	;check if not alerted
+	jz	.no_alert	;its okay!
+	call	f_alert	;dont cry you have someone
+	;but you may not deserve her
+.no_alert:
 	jmp	.loop_object	;loop over
 f_kill:
 	push	rdx
