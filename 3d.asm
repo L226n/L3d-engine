@@ -1,3 +1,11 @@
+%assign	START_WIDTH	22
+%assign	START_HEIGHT	13
+%assign	FLOAD_WIDTH	50
+%assign	FLOAD_HEIGHT	20
+%assign	LSC_WARN_WIDTH	47
+%assign	LSC_WARN_HEIGHT	11
+%assign	NR_WARN_HEIGHT	10
+%assign	TOP_SIZE	4
 %include	"input.asm"
 %include	"matrix.asm"
 %include	"graphics.asm"
@@ -8,8 +16,6 @@
 %include	"gui.asm"
 ;external files
 section	.data
-	TOP_SIZE	equ	4
-	ICANON	equ	1<<1
 	msg	db	"msg", 10
 	matrix_screen	dd	16, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 234356
 	matrix_projection	dd	16, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 234356
@@ -103,8 +109,11 @@ section	.data
 		tv_sec	dq	0
 		tv_usec	dq	33333333
 	;time struct
-	handler:
-		dq	f_kill
+	handler_int:
+		dq	f_int
+		dd	0x04000000
+	handler_seg:
+		dq	f_seg
 		dd	0x04000000
 	;signal handler struct
 	float_test	dd	-9.38
@@ -203,6 +212,39 @@ section	.data
 	white_ansi	db	"231"
 	black_ansi	db	"232"
 	second	dq	1000000000
+	print_length	dq	0
+	menu_options	dd	0, 0, 0, 0
+	selected_option	dw	0
+	base_brk	dq	0
+	brk_reserved	dq	0
+	clear	db	27, "[H", 27, "[J"
+	brk	dq	0
+	brk_len	dq	0
+	previous_written	dq	0
+	current_scroll	dw	0
+	file_count	dw	0
+	round_errors	db	0
+	cwd_end	dw	0
+	first_run	db	0
+	pad_row	db	0
+	up_dir	db	"..", 0
+	choice	db	0
+	choice_width	dw	0
+	choice_height	dw	0
+	start_menu:
+		dd	"╭", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "╮"
+		dd	"│", " ", " ", "_", " ", " ", " ", " ", " ", " ", "_", "_", "_", "_", "_", "_", "_", "_", " ", " ", " ", "│"
+		dd	"│", " ", "|", " ", "|", " ", " ", " ", " ", "|", "_", "_", "_", " ", " ", " ", "_", " ", "\", " ", " ", "│"
+		dd	"│", " ", "|", " ", "|", " ", " ", " ", " ", " ", " ", "|", "_", " ", " ", "|", " ", "|", " ", "|", " ", "│"
+		dd	"│", " ", "|", " ", "|", "_", "_", "_", " ", " ", "_", "_", "_", ")", " ", "|", "_", "|", " ", "|", " ", "│"
+		dd	"│", " ", "|", "_", "_", "_", "_", "_", "|", "|", "_", "_", "_", "_", "_", "_", "_", "_", "/", " ", " ", "│"
+		dd	"│", " ", "V", "0", ".", "3", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "│"
+		dd	"│", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "│"
+		dd	"│", " ", ">", " ", "L", "o", "a", "d", " ", "g", "a", "m", "e", " ", " ", " ", " ", " ", " ", " ", " ", "│"
+		dd	"│", " ", " ", " ", "E", "d", "i", "t", "o", "r", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "│"
+		dd	"│", " ", " ", " ", "C", "r", "e", "d", "i", "t", "s", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "│"
+		dd	"│", " ", " ", " ", "E", "x", "i", "t", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "│"
+		dd	"╰", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "╯"
 	timer:
 		timer_seconds	dq	0
 		timer_nanoseconds	dq	0
@@ -239,6 +281,27 @@ section	.data
 		dd	0.2	;function increment (+17)
 		dd	0.0	;current value to pass to function (+21)
 		dw	-1	;end
+	resize_msg	db	"This software only works if your terminal size is ≥ 102x20!", 10
+	resize_len	equ	$ - resize_msg
+	even_msg	db	"This software only works if your terminal width is even!", 10
+	even_len	equ	$ - even_msg
+	exit_msg	db	"Program exited with code ", 48, 0, 0, 0, 10
+	exit_len	equ	$ - exit_msg
+	exit_code_offset	equ	25
+	open_game_str	db	"Open .lgm/.lsc files", 0
+	confirm_lsc_msg:
+		db	"WARNING: .lsc files represent a particular", 1
+		db	"scene in a game, rather than the full game.", 1
+		db	"The file can still be loaded, however the", 1
+		db	"scene will not act the same way that it", 1
+		db	"would in a full game, and will instead be", 1
+		db	"loaded with L3d defaults. Load anyway?", 0
+	confirm_nr_msg:
+		db	"WARNING: The selected file does not have", 1
+		db	"an extension recognised by L3d as a", 1
+		db	"playable file, you can still load the", 1
+		db	"file but the data may not be valid. Load", 1
+		db	"anyway?", 0
 section	.bss
 	termios:
 		c_iflag	resd	1
@@ -263,30 +326,83 @@ section	.bss
 	files	resb	96
 	depth_buffer	resd	38400
 	message	resb	128
+	cwd_file	resb	1024
+	file_indexes	resd	FLOAD_HEIGHT-3
+	file_swap_buffer	resb	512
 section	.text
 	global	_start
 _start:
-	;lea	r15, [obj_texture]
-	;lea	r14, [dimensions]
-	;call	f_write_tex
-	;mov	rdx, 101
-	;call	f_kill
-	lea	r15, [scene_meta]
-	lea	r14, [obj_count]
-	lea	r13, [init_info]
-	lea	r12, [mainloop_info]
-	call	f_write_scene
-	call	f_read_scene
 	finit	;initialise FPU control words
+	mov	rax, 12	;sys_brk woof!!!!!!! (sorry)
+	xor	rdi, rdi	;0 to get current brk
+	syscall
+	mov	qword[base_brk], rax
 	mov	rax, 13	;system call for sys_rt_sigaction
 	mov	rdi, 2	;signal here is SIGINT
-	mov	rsi, handler	;handler structure
+	mov	rsi, handler_int	;handler structure
 	mov	rdx, 0	;previous struct is nil
 	mov	r10, 8	;size of something who knows it works
 	syscall
 	mov	rax, 13	;sys_rt_sigaction again
 	mov	rdi, 11	;SIGSEGV this time
+	mov	rsi, handler_seg
 	syscall
+	mov	rax, 16	;system call for sys_ioctl
+	mov	rdi, 1	;stdout
+	mov	rsi, 21505	;TCGETS
+	mov	rdx, termios	;buffer
+	syscall
+	and	dword[c_lflag], ~(1 << 1)	;clears canonical flag
+	and	dword[c_lflag], ~(1 << 3)	;clears the echo flag
+	mov	rax, 16	;system call for sys_ioctl
+	mov	rdi, 1	;stdout
+	mov	rsi, 21506	;TCSETS
+	mov	rdx, termios	;buffer
+	syscall
+	mov	rax, 16	;system call for sys_ioctl
+	mov	rdi, 1	;stdout
+	mov	rsi, 21523	;TIOCGWINSZ
+	mov	rdx, window_size	;buffer for window size
+	syscall
+	cmp	word[window_size], 20
+	jl	.term_small
+	cmp	word[window_size+2], 102
+	jl	.term_small
+	jmp	.term_ok
+.term_small:
+	mov	rax, 1
+	mov	rdi, 1
+	mov	rsi, resize_msg
+	mov	rdx, resize_len
+	syscall
+	mov	dword[exit_msg+exit_code_offset], "0" << 24
+	mov	r15, 255
+	call	f_kill
+.term_ok:
+	movzx	rax, word[window_size]	;move window height into rax
+	sub	rax, 3	;sub 3 to get available window space
+	mov	word[available_window], ax	;
+	sub	rax, 2
+	mov	word[alert_y_offset], ax
+	test	word[window_size+2], 1	;test LSB of rax 
+	jz	.term_even	;if its even skip killing bc of width
+	mov	rax, 1
+	mov	rdi, 1
+	mov	rsi, even_msg
+	mov	rdx, even_len
+	syscall
+	mov	dword[exit_msg+exit_code_offset], "0" << 24
+	mov	r15, 255
+	call	f_kill
+.term_even:
+	shr	word[window_size+2], 1
+	movzx	rax, word[window_size+2]	;moves window width into rax
+	mov	word[screen_x_center], ax
+	shr	word[screen_x_center], 1
+	mul	word[window_size]	;multiply window height by width
+	mov	rbx, 13	;then multiplies it by 13 (one unit is 13 bytes)
+	mul	rbx	;actual multiplication
+	mov	dword[screen_size], eax	;moves result into screen size
 	mov	rax, 9	;sys_mmap
 	mov	rdi, 0	;automatic offset
 	mov	rsi, 499712	;size to reserve (multiple of 4096)
@@ -300,38 +416,7 @@ _start:
 	add	qword[frames], 8	;frame counter is after polling memory
 	mov	qword[framebuf], rax	;framebuf is uh
 	add	qword[framebuf], 16	;same thing but 16 bytes after
-	mov	rax, 16	;system call for sys_ioctl
-	mov	rdi, 1	;stdout
-	mov	rsi, 21505	;TCGETS
-	mov	rdx, termios	;buffer
-	syscall
-	and	dword[c_lflag], ~ICANON	;clears canonical flag
-	and	dword[c_lflag], ~(1 << 3)	;clears the echo flag
-	mov	rax, 16	;system call for sys_ioctl
-	mov	rdi, 1	;stdout
-	mov	rsi, 21506	;TCSETS
-	mov	rdx, termios	;buffer
-	syscall
-	mov	rax, 16	;system call for sys_ioctl
-	mov	rdi, 1	;stdout
-	mov	rsi, 21523	;TIOCGWINSZ
-	mov	rdx, window_size	;buffer for window size
-	syscall
-	movzx	rax, word[window_size]	;move window height into rax
-	sub	rax, 3	;sub 3 to get available window space
-	mov	word[available_window], ax	;
-	sub	rax, 2
-	mov	word[alert_y_offset], ax
-	test	word[window_size+2], 1	;test LSB of rax 
-	jnz	f_kill	;if its a 1 (odd) then kill
-	shr	word[window_size+2], 1
-	movzx	rax, word[window_size+2]	;moves window width into rax
-	mov	word[screen_x_center], ax
-	shr	word[screen_x_center], 1
-	mul	word[window_size]	;multiply window height by width
-	mov	rbx, 13	;then multiplies it by 13 (one unit is 13 bytes)
-	mul	rbx	;actual multiplication
-	mov	dword[screen_size], eax	;moves result into screen size
+	call	f_start_menu
 	call	f_initialise_screen	;prepare the screen for display
 	mov	rax, 22	;system call for sys_pipe	
 	mov	rdi, pipe	;store resulting fds here
@@ -359,6 +444,7 @@ _start:
 	call	f_update_camera_axis	;update camera axis
 	call	f_camera_rotation_matrix	;and then regenerate the rotation matrix
 	call	f_camera_translation_matrix	;and translation matrix
+	call	f_read_scene
 .loop:
 	mov	rax, [poll]	;moves the address of the shared memory for polling 
 	mov	qword[rax], 0	;then clears the previously polled inputs
@@ -437,8 +523,24 @@ _start:
 	;but you may not deserve her
 .no_alert:
 	jmp	.loop_object	;loop over
+f_int:
+	mov	dword[exit_msg+exit_code_offset], "1" << 24
+	call	f_kill
+f_seg:
+	mov	dword[exit_msg+exit_code_offset], "-1" << 16
+	call	f_kill
 f_kill:
 	push	rdx
+	mov	rax, 12
+	mov	rdi, qword[brk]
+	syscall
+	or	dword[c_lflag], 1<<3
+	or	dword[c_lflag], 1<<1
+	mov	rax, 16	;system call for sys_ioctl
+	mov	rdi, 1	;stdout
+	mov	rsi, 21506	;TCSETS
+	mov	rdx, termios	;buffer
+	syscall
 	mov	rax, 11	;sys_munmap
 	mov	rdi, [poll]	;start of memory to unmap
 	mov	rsi, 499712	;size of memory blah blah
@@ -455,7 +557,19 @@ f_kill:
 	add	rbx, 16	;go to next bit to unmap
 	jmp	.unmap_loop
 .done:
+	cmp	r15, 255
+	jz	.skip_clear
+	mov	rax, 1
+	mov	rdi, 1
+	mov	rsi, clear
+	mov	rdx, 6
+	syscall
+.skip_clear:
+	mov	rax, 1
+	mov	rdi, 1
+	mov	rsi, exit_msg
+	mov	rdx, exit_len
+	syscall
 	mov	rax, 60	;sys_exit
-	pop	rdx
-	mov	rdi, rdx	;weird exit code so yk it exited right
+	mov	rdi, 0	;always use 0 bc its specified above
 	syscall
