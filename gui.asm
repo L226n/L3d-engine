@@ -229,8 +229,14 @@ f_initialise_menu:
 	mul	rbx	;multiply quarter window width by window height
 	shl	rax, 2	;quadruple it bc it needs to be in dwords
 	mov	qword[print_length], rax	;save this here ohhh thats where it came from
+	add	qword[print_length], 6	;add clear sequence length
 	xor	rbx, rbx	;reset this guy
 	mov	r15, qword[framebuf]	;move frame buffer into r15 it stays here FOREVER
+	mov	byte[r15], 27	;insert clear sequence
+	mov	word[r15+1], "[H"
+	mov	byte[r15+3], 27
+	mov	word[r15+4], "[J"
+	add	r15, GUI_TOP_SIZE	;add clear sequence length
 .loop:
 	cmp	rax, 0	;check if this is 0 (iterate over every dword)
 	jz	.space_populated	;if its done go away

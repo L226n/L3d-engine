@@ -6,6 +6,7 @@
 %assign	LSC_WARN_HEIGHT	11
 %assign	NR_WARN_HEIGHT	10
 %assign	TOP_SIZE	4
+%assign GUI_TOP_SIZE	6
 %include	"input.asm"
 %include	"matrix.asm"
 %include	"graphics.asm"
