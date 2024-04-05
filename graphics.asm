@@ -760,6 +760,7 @@ f_generate_row:
 	push	rbx
 	push	rcx
 	mov	dword[r15+rbx-4], r14d	;move the byte to write into first space
+	;was there ever a reason to have the start address as +4???
 .generate_middle:
 	cmp	rcx, 2	;checks if rcx (column counter) is 2 (finished middle)
 	jz	.end	;if yes, go to end
@@ -769,6 +770,8 @@ f_generate_row:
 	jmp	.generate_middle	;loop over
 .end:
 	mov	dword[r15+rbx], r12d	;move in end char
+	cmp	r8, 255
+	jz	.end_clear
 	add	rbx, 4	;increase rbx to next char
 	mov	byte[r15+rbx], 0	;and then move in 0 byte
 	;reason: if u dont u get unfinished escapes that dont match screen width
