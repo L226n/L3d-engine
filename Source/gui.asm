@@ -39,9 +39,10 @@
 	%endrep
 %endmacro
 f_choice_menu:
+	get_box_tl_mem	;get box tl
+.insert_editor:
 	mov	byte[choice], 0	;reset choice to 0
 	push	r14	;push message string addr
-	get_box_tl_mem	;get box tl
 	mov	rbx, rax	;save return to rbx
 	movzx	rcx, word[choice_width]	;width yep
 	mov	r14, "╭"	;vals to use
@@ -139,6 +140,7 @@ f_choice_menu:
 	mov	dword[r15+r13], " "
 	jmp	.print_menu
 f_start_menu:
+	mov	word[selected_option], 0
 	call	f_initialise_menu	;initialise the framebuffer for the start menu
 .print_menu:
 	mov	rax, 1	;sys_write
@@ -159,19 +161,24 @@ f_start_menu:
 .enter:
 	cmp	byte[selected_option], 12	;check if selected option (multiples of 4) is option 4
 	jz	f_kill	;if yes, kill program bc option 12 is exit
+	cmp	byte[selected_option], 4
+	jnz	.continue_a
+	mov	byte[editor], 255
+	ret
+.continue_a:
 	cmp	byte[selected_option], 0	;check if its option 1
-	jnz	.else_a	;if its not, skip the call
+	jnz	.print_menu
 .return_no:
 	lea	r14, [open_game_str]	;string to put in file open
 	call	f_open_file_dialog	;call the game open dialog
+	cmp	rax, -1
+	jz	f_start_menu
 	movzx	rax, word[cwd_end]	;move cwd end here
 	cmp	dword[cwd_file+rax-4], ".lgm"	;to check the file extension
 	jnz	.confirm_load	;if its not lgm ask some questions
 .return_yes:
 	call	f_fix_cwd	;fix the cwd string
 	ret	;and return
-.else_a:
-	jmp	.print_menu	;loooooop over
 .confirm_load:
 	cmp	dword[cwd_file+rax-4], ".lsc"	;check if loading lsc
 	jz	.confirm_lsc	;if it is, go here
@@ -229,14 +236,8 @@ f_initialise_menu:
 	mul	rbx	;multiply quarter window width by window height
 	shl	rax, 2	;quadruple it bc it needs to be in dwords
 	mov	qword[print_length], rax	;save this here ohhh thats where it came from
-	add	qword[print_length], 6	;add clear sequence length
 	xor	rbx, rbx	;reset this guy
 	mov	r15, qword[framebuf]	;move frame buffer into r15 it stays here FOREVER
-	mov	byte[r15], 27	;insert clear sequence
-	mov	word[r15+1], "[H"
-	mov	byte[r15+3], 27
-	mov	word[r15+4], "[J"
-	add	r15, GUI_TOP_SIZE	;add clear sequence length
 .loop:
 	cmp	rax, 0	;check if this is 0 (iterate over every dword)
 	jz	.space_populated	;if its done go away
@@ -264,8 +265,10 @@ f_initialise_menu:
 	mov	dword[menu_options+12], eax
 	ret	;done!!1
 f_open_file_dialog:	;o h god
-	push	r14	;message string arg
 	get_box_tl	FLOAD_WIDTH, FLOAD_HEIGHT	;this works here too but other vals
+.insert_editor:
+	mov	word[buf2+1], 0
+	push	r14	;message string arg
 	mov	rbx, rax	;save tl in rbx
 	push	rbx	;push it now
 	xor	r14, r14	;counter of some sort
@@ -333,7 +336,10 @@ f_open_file_dialog:	;o h god
 	movzx	rax, byte[r14+rcx]	;move in byte in message string to rax
 	cmp	rax, 0	;check if its 0
 	jz	.msg_inserted	;if it is its inserted the msg
+	cmp	byte[buf2], 255
+	jz	.skip_msg_insert
 	mov	dword[r15+rbx], eax	;else put the char into the framebuffer
+.skip_msg_insert:
 	add	rbx, 4	;increase framebuffer counter
 	inc	rcx	;and message byte counter
 	jmp	.loop_insert_msg	;loop
@@ -346,10 +352,17 @@ f_open_file_dialog:	;o h god
 .dont_pad_msg:
 	mov	ebx, dword[file_indexes+(FLOAD_HEIGHT-4)*4]	;reload rbx with val from earlier
 	times	FLOAD_WIDTH-5	add	rbx, 4	;this just moves to the end of info box
+	mov	r8, rbx
+	sub	r8, (FLOAD_WIDTH-4-20)*4
 	movzx	rcx, word[cwd_end]	;store cwd end in rcx
 .insert_path:
 	dec	rcx	;decrease (to skip null byte)
 	movzx	rax, byte[cwd_file+rcx]	;move previous byte into rax
+	cmp	byte[buf2], 255
+	jnz	.check_space
+	cmp	rbx, r8
+	jz	.truncate_path
+.check_space:
 	cmp	dword[r15+rbx], " "	;check if framebuffer char is a space
 	jnz	.truncate_path	;if yes the truncate the path
 	mov	dword[r15+rbx], eax	;otherwise move in the path byte
@@ -538,15 +551,39 @@ f_open_file_dialog:	;o h god
 	mov	rsi, qword[framebuf]
 	mov	rdx, qword[print_length]
 	syscall
+	mov	word[buf1], 0
 	mov	rax, 0
 	mov	rdi, 1
 	mov	rsi, buf1
 	mov	rdx, 4
 	syscall
+	cmp	byte[buf2], 255
+	jnz	.skip_append_dest
+	cmp	byte[buf1], " "
+	jae	.append_dest
+.skip_append_dest:
 	cmp	byte[buf1], 10	;still the same,,,
 	jz	.enter
 	cmp	byte[buf1], 27
 	jz	.test_escapes
+	jmp	.print_menu
+.append_dest:
+	movzx	rbx, word[buf2+1]
+	add	ebx, dword[file_indexes+(FLOAD_HEIGHT-4)*4]	;move in extra index at end of data
+	cmp	byte[buf1], 127
+	jnz	.skip_delete
+	cmp	word[buf2+1],0
+	jz	.print_menu
+	mov	dword[r15+rbx-4], " "
+	sub	word[buf2+1], 4
+	jmp	.print_menu
+.skip_delete:
+	cmp	word[buf2+1], 80
+	jz	.skip_append
+	movzx	eax, byte[buf1]
+	mov	dword[r15+rbx], eax
+	add	word[buf2+1], 4
+.skip_append:
 	jmp	.print_menu
 .enter:
 	movzx	rax, word[current_scroll]	;get scroll val
@@ -586,13 +623,32 @@ f_open_file_dialog:	;o h god
 	jmp	.file_appended	;and now cwd processed
 .append_file:
 	mov	dl, byte[r13+rbx]	;normally just do a byte copy
-	mov	byte[cwd_file+rax], dl
 	cmp	dl, 0
 	jz	.file_appended
+	mov	byte[cwd_file+rax], dl
 	inc	rax
 	inc	rbx
 	jmp	.append_file
+.append_file_save:
+	mov	ebx, dword[file_indexes+(FLOAD_HEIGHT-4)*4]	;move in extra index at end of data
+	movzx	rcx, word[buf2+1]
+	movzx	rax, word[cwd_end]
+.append_file_save_loop:
+	cmp	rcx, 0
+	jz	.skip_save_check
+	mov	dl, byte[r15+rbx]
+	mov	byte[cwd_file+rax], dl
+	sub	rcx, 4
+	add	rbx, 4
+	inc	rax
+	jmp	.append_file_save_loop
 .file_appended:
+	cmp	byte[buf2], 255
+	jnz	.skip_save_check
+	cmp	byte[cwd_file+rax-1], "/"
+	jnz	.append_file_save
+.skip_save_check:
+	mov	byte[cwd_file+rax], 0
 	mov	word[cwd_end], ax	;save the offset
 	movzx	rdx, word[selected_option]	;do the thing to reset uh
 	mov	edx, dword[file_indexes+rdx]	;te arrow > thing
@@ -616,6 +672,8 @@ f_open_file_dialog:	;o h god
 	jz	.cycle_options_down
 	cmp	word[buf1+1], "[C"
 	jz	.enter
+	cmp	byte[buf1+1], 0
+	jz	.escape_dialog
 	jmp	.print_menu
 .cycle_options_up:
 	cmp	word[selected_option], 0	;at top of page?
@@ -662,6 +720,12 @@ f_open_file_dialog:	;o h god
 	mov	eax, dword[file_indexes+rbx]
 	mov	dword[r15+rax], ">"
 	jmp	.print_menu
+.escape_dialog:
+	mov	rax, 12	;brk now
+	mov	rdi, qword[brk]	;release memory
+	syscall
+	mov	rax, -1
+	ret
 f_ascii_lower:
 	cmp	sil, "A"	;check if byte is A
 	jb	.not_capital_sil	;if its loewr its not capital

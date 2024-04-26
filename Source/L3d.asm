@@ -1,12 +1,5 @@
-%assign	START_WIDTH	22
-%assign	START_HEIGHT	13
-%assign	FLOAD_WIDTH	50
-%assign	FLOAD_HEIGHT	20
-%assign	LSC_WARN_WIDTH	47
-%assign	LSC_WARN_HEIGHT	11
-%assign	NR_WARN_HEIGHT	10
-%assign	TOP_SIZE	4
-%assign GUI_TOP_SIZE	6
+%include	"definitions.asm"
+%include	"editor.asm"
 %include	"input.asm"
 %include	"matrix.asm"
 %include	"graphics.asm"
@@ -64,13 +57,13 @@ section	.data
 			db	"239", "244", "244", "244", "244", "244", "244", "239"
 			db	"239", "239", "239", "239", "239", "239", "239", "239"
 	dimensions	dw	8, 8
-	;these are matrices for a cube
-	obj_aux_0	times 34	dd	0.0
-	obj_aux_1	times 34	dd	0.0
-	obj_aux_2	times 34	dd	0.0
-	matrix_ndc	times 34	dd	0.0
+	;these are matrices for a whatever
+	obj_aux_0	times 402	dd	0.0
+	obj_aux_1	times 402	dd	0.0
+	obj_aux_2	times 402	dd	0.0
+	matrix_ndc	times 402	dd	0.0
 	;+ aux versions
-	unit_template	db	27, "[48;5;000m  "
+	unit_template	db	27, "[48;5;232m  "
 	;template for units
 	screen_size	dd	0
 	;buffer for screen size
@@ -81,8 +74,8 @@ section	.data
 	buf2	dd	0
 	buf3	dd	0
 	;buffers
-	line_start	dd	1.0, 0.0
-	line_end	dd	0.0, 1.0
+	line_start	dd	0.0, 0.0
+	line_end	dd	8.0, 8.0
 	line_buf	dd	0.0, 0.0
 	line_val	dd	0.0
 	line_i	dd	1.0, -1.0
@@ -118,7 +111,7 @@ section	.data
 		dd	0x04000000
 	;signal handler struct
 	float_test	dd	-9.38
-	float_multiplier	dd	100.0
+	float_multiplier	dd	10000.0
 	cw	dw	0
 	;fpu control word
 	file_separator	dw	65535
@@ -201,37 +194,120 @@ section	.data
 	;this is to count which aux buffers to use in which order
 	;however it doesnt seem like it changes anything so for now it does nothing
 	message_clear	db	"  "
+	;clears old msg parts, stored in mem for compatability with f_draw_ui
 	alerted	db	0
+	;bool for alerted
 	alert_tick	dq	0
+	;ticker for alert duration
 	alert_end	db	0
+	;byte to tell engine to clear message
 	alert_y_offset	dw	0
-	screen_x_center	dw	0
+	;y offset for msg
 	alert_x_offset	dw	0
+	;x offset
+	screen_x_center	dw	0
+	;center of screen
 	paused	db	0
 	wireframe	db	0
 	culling	db	255
+	type_id	db	0
+	;bools for various settings
 	white_ansi	db	"231"
 	black_ansi	db	"232"
-	second	dq	1000000000
+	red_ansi	db	"124"
+	blue_ansi	db	"019"
+	yellow_ansi	db	"172"
+	green_ansi	db	"034"
+	purple_ansi	db	"092"
+	;ansi codes for various things (in memory for compat)
 	print_length	dq	0
-	menu_options	dd	0, 0, 0, 0
+	;length of framebuf used sometimes messy code strikes again
 	selected_option	dw	0
+	;store offset of arrow selector p much
 	base_brk	dq	0
+	;base program brk
 	brk_reserved	dq	0
+	;amount reserved
 	clear	db	27, "[H", 27, "[J"
+	;clear sequence
 	brk	dq	0
+	;what
 	brk_len	dq	0
+	;whats the difference
 	previous_written	dq	0
+	;used to see if enough memory allocated in sys_getdents loop
 	current_scroll	dw	0
+	;current files scroll
 	file_count	dw	0
+	;number of files in dir
 	round_errors	db	0
+	;bubble sort errors in round
 	cwd_end	dw	0
+	;end of cwd string position
 	first_run	db	0
+	;not sure if this is actually used
 	pad_row	db	0
+	;pad row byte
 	up_dir	db	"..", 0
+	;up a dir thingie
 	choice	db	0
+	;return from choice window
 	choice_width	dw	0
 	choice_height	dw	0
+	;words for size of choice window
+	editor	db	0
+	;editor bool
+	preview_width	dw	0
+	preview_height	dw	0
+	offset_graphics_window	dq	0
+	row_width_editor	dq	0
+	row_width_bars	dq	0
+	;values for offset graphics window
+	edited_obj	dq	0
+	edited_obj_len	dd	0
+	edited_obj_available	dw	0
+	edited_faces	dq	0
+	edited_faces_len	dd	0
+	edited_faces_available	dw	0
+	points_dat	dq	0
+	points_dat_len	dd	0
+	points_dat_available	dw	0
+	lbar_offset	dq	0
+	bbar_offset	dq	0
+	option_divisor	db	0
+	scope	db	0
+	steps:
+		step_xs	dd	0.001
+		step_s	dd	0.01
+		step_m	dd	0.1
+		step_l	dd	1.0
+	step	dd	0.1
+	step_angle_int	dw	1
+	step_angle	dd	0.01745329251
+	current_step	db	8
+	current_step_angle	db	0
+	update	db	0, 0
+	max_id	db	"!!"
+	jump_point	dq	0
+	edited_obj_offset	dq	20
+	edited_faces_offset	dq	0
+	point_dat_offset	dd	4
+	line_colour	dq	0
+	update_func	dq	0
+	apply_func	dq	0
+	operation_angle	dd	0, 0, 0
+	selection_length	db	0
+	error_space	db	0
+	load_editor	db	0
+	project_saved	db	255
+	bbar_items:
+		.scope	dq	0
+		.culling	dq	0
+		.typeid	dq	0
+		.selection	dq	0
+		.vertices	dq	0
+		.triangles	dq	0
+		.saved	dq	0
 	start_menu:
 		dd	"╭", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "─", "╮"
 		dd	"│", " ", " ", "_", " ", " ", " ", " ", " ", " ", "_", "_", "_", "_", "_", "_", "_", "_", " ", " ", " ", "│"
@@ -290,6 +366,7 @@ section	.data
 	exit_len	equ	$ - exit_msg
 	exit_code_offset	equ	25
 	open_game_str	db	"Open .lgm/.lsc files", 0
+	open_obj_str	db	"Open .l3d files", 0
 	confirm_lsc_msg:
 		db	"WARNING: .lsc files represent a particular", 1
 		db	"scene in a game, rather than the full game.", 1
@@ -303,6 +380,28 @@ section	.data
 		db	"playable file, you can still load the", 1
 		db	"file but the data may not be valid. Load", 1
 		db	"anyway?", 0
+	confirm_n3d_str:
+		db	"WARNING: The selected file does not have", 1
+		db	"an extension recognised by L3d as a", 1
+		db	"3d object file, you can still load the", 1
+		db	"file but the data may not be valid. Load", 1
+		db	"anyway?", 0
+	confirm_unsaved_str:
+		db	"WARNING: Your project has unsaved", 1
+		db	"changes, which will be lost when", 1
+		db	"loading a new object, load anyway?", 0
+	confirm_ow_str:
+		db	"WARNING: The file you chose already", 1
+		db	"exists, and saving will overwrite", 1
+		db	"the already existing file, save", 1
+		db	"anyway?", 0
+	editor_err:
+		db	27, "[31"
+		dd	"m"
+		dd	"ER"
+		dd	"RO"
+		dd	"R_"
+	;various messages
 section	.bss
 	termios:
 		c_iflag	resd	1
@@ -330,6 +429,14 @@ section	.bss
 	cwd_file	resb	1024
 	file_indexes	resd	FLOAD_HEIGHT-3
 	file_swap_buffer	resb	512
+	menu_options	resd	50
+	;menu options offsets
+	menu_entries	resw	50
+	option_data_id	resw	10	;10 id slots
+	option_data_rot	resb	36	;6 rotation slots
+	option_data_pos	resd	9	;9 translation slots
+	selection	resd	50
+	working_file	resb	100
 section	.text
 	global	_start
 _start:
@@ -365,19 +472,19 @@ _start:
 	mov	rsi, 21523	;TIOCGWINSZ
 	mov	rdx, window_size	;buffer for window size
 	syscall
-	cmp	word[window_size], 20
+	cmp	word[window_size], 20	;you can guess here
 	jl	.term_small
 	cmp	word[window_size+2], 102
 	jl	.term_small
 	jmp	.term_ok
 .term_small:
-	mov	rax, 1
+	mov	rax, 1	;print 'too small' string
 	mov	rdi, 1
-	mov	rsi, resize_msg
+	mov	rsi, resize_msg	;msg and len are stored
 	mov	rdx, resize_len
 	syscall
-	mov	dword[exit_msg+exit_code_offset], "0" << 24
-	mov	r15, 255
+	mov	dword[exit_msg+exit_code_offset], "0" << 24	;move in 0 to say successful exit
+	mov	r15, 255	;some sorta param
 	call	f_kill
 .term_ok:
 	movzx	rax, word[window_size]	;move window height into rax
@@ -418,6 +525,10 @@ _start:
 	mov	qword[framebuf], rax	;framebuf is uh
 	add	qword[framebuf], 16	;same thing but 16 bytes after
 	call	f_start_menu
+	cmp	byte[editor], 255
+	jnz	.not_editor
+	call	f_editor
+.not_editor:
 	call	f_initialise_screen	;prepare the screen for display
 	mov	rax, 22	;system call for sys_pipe	
 	mov	rdi, pipe	;store resulting fds here
@@ -431,20 +542,11 @@ _start:
 	syscall
 	cmp	rax, 0	;check if child
 	jz	f_poll	;if yes, go to polling process
-	fild	word[window_size+2]	;load window width
-	fild	word[window_size]	;load window height
-	fdiv	st1	;divide window height by width
-	fld	dword[camera_h_fov]	;load h_fov
-	fmul	st1	;multiply it by window height / width
-	fst	dword[camera_v_fov]	;and thats camera_vfov
-	emms	;clearrr
-	call	f_projection_matrix	;generate projection matrix
-	call	f_screen_matrix	;and screen matrix
+	lea	r15, [window_size]
+	lea	r14, [window_size+2]
+	call	f_init_matrices
 	call	f_pos_string	;generate location string
 	call	f_insert_location	;then insert it into framebuf
-	call	f_update_camera_axis	;update camera axis
-	call	f_camera_rotation_matrix	;and then regenerate the rotation matrix
-	call	f_camera_translation_matrix	;and translation matrix
 	call	f_read_scene
 .loop:
 	mov	rax, [poll]	;moves the address of the shared memory for polling 
@@ -497,19 +599,7 @@ _start:
 	inc	byte[obj_counter]	;increase said counter
 .loop_objects:
 	mov	r15, [imported_addr]	;use object vertices
-	lea	r14, [matrix_camera]	;multiply by new camera matrix
-	lea	r13, [obj_aux_2]	;result in copy memory
-	call	f_multiply_matrix	;multiply them
-	lea	r15, [obj_aux_2]	;nodes from last multiplication in obj_aux_1
-	lea	r14, [matrix_projection]	;multiply by projection matrix
-	lea	r13, [obj_aux_1]	;and result in first cube matrix
-	call	f_multiply_matrix	;go
-	lea	r15, [obj_aux_1]	;use r15 to hold matrix to normalise
-	call	f_normalise_matrix	;normalise matrix
-	lea	r15, [obj_aux_1]	;matrix A is result of normalisation
-	lea	r14, [matrix_screen]	;matrix B is screen matrix
-	lea	r13, [obj_aux_2]	;result matrix
-	call	f_multiply_matrix	;bdsaojoicxzoiwadpszx
+	call	f_apply_transformation	;does all matrix stuff, result in obj_aux_2
 	lea	r15, [obj_aux_2]	;matrix to put onto screen
 	mov	r14, [imported_addr+8]	;array containing cube edge indexes
 	mov	r13, [imported_addr]	;containing cube vertices
@@ -531,17 +621,35 @@ f_seg:
 	mov	dword[exit_msg+exit_code_offset], "-1" << 16
 	call	f_kill
 f_kill:
-	push	rdx
-	mov	rax, 12
-	mov	rdi, qword[brk]
+	push	rdx	;kill code
+	mov	rax, 12	;sys_brk
+	mov	rdi, qword[brk]	;program original breakpoint
 	syscall
-	or	dword[c_lflag], 1<<3
+	or	dword[c_lflag], 1<<3	;just reset terminal struct
 	or	dword[c_lflag], 1<<1
 	mov	rax, 16	;system call for sys_ioctl
 	mov	rdi, 1	;stdout
 	mov	rsi, 21506	;TCSETS
 	mov	rdx, termios	;buffer
 	syscall
+	cmp	qword[edited_obj], 0	;check if editor was used
+	jz	.skip_editor_unmaps	;if no skip this
+	mov	rax, 11	;if yes, sys_munmap
+	mov	rdi, qword[edited_obj]	;various addr to unmap
+	xor	rsi, rsi
+	mov	esi, dword[edited_obj_len]	;and length
+	syscall
+	mov	rax, 11	;and same again
+	mov	rdi, qword[points_dat]
+	xor	rsi, rsi
+	mov	esi, dword[points_dat_len]
+	syscall
+	mov	rax, 11	;and same again
+	mov	rdi, qword[edited_faces]
+	xor	rsi, rsi
+	mov	esi, dword[edited_faces_len]
+	syscall
+.skip_editor_unmaps:
 	mov	rax, 11	;sys_munmap
 	mov	rdi, [poll]	;start of memory to unmap
 	mov	rsi, 499712	;size of memory blah blah
@@ -556,21 +664,22 @@ f_kill:
 	mov	rsi, qword[reserved_memory+rbx+8]	;and length
 	syscall
 	add	rbx, 16	;go to next bit to unmap
-	jmp	.unmap_loop
+	jmp	.unmap_loop	;shoutout to Shosela from freddy five night
 .done:
-	cmp	r15, 255
+	cmp	r15, 255	;if this dont clear terminal
 	jz	.skip_clear
-	mov	rax, 1
+	mov	rax, 1	;print a clear terminal sequence
 	mov	rdi, 1
 	mov	rsi, clear
 	mov	rdx, 6
 	syscall
 .skip_clear:
-	mov	rax, 1
+	mov	rax, 1	;move in exit messages
 	mov	rdi, 1
-	mov	rsi, exit_msg
+	mov	rsi, exit_msg	;yep
 	mov	rdx, exit_len
 	syscall
+	pop	rdx
 	mov	rax, 60	;sys_exit
-	mov	rdi, 0	;always use 0 bc its specified above
+	mov	rdi, rdx	;exit msg thing
 	syscall

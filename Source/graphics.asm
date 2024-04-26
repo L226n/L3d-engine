@@ -23,9 +23,7 @@
 	fist	dword[triangle+%1*8]	;store as int in tri struct
 	fld	dword[r15+rax+4]	;do same with y pos
 	fist	dword[triangle+%1*8+4]
-	lea	r8, [camera_position]	;distance from camera position
-	call	f_euclidean_distance	;get depth
-	fld	dword[vertex_depth]	;load depth
+	fld	dword[matrix_ndc+rax+8]	;load depth
 	fst	dword[vertex_attr+%1*16+12]	;and store here
 	fld1	;and load 1
 	fdiv	st1	;recpirocal of vertex_depth
@@ -416,6 +414,7 @@ f_node_screen:
 	;call	f_check_visible	;check if face is visible
 	;cmp	r8, 2	;if it isnt,
 	;jz	.dont_draw_1	;go to loop over
+	mov	qword[jump_point], f_draw_point
 	call	f_draw_line	;draw the line
 .dont_draw_1:
 	sub	rcx, 2	;decrease rcx by 2, so that it draws lines between the previous 2 points
@@ -512,13 +511,37 @@ f_draw_point:
 	pop	rax	;.
 	ret
 .not_draw:
-	pop	rbx	;"googy" - lusii probably
+	pop	rbx	;bubble wrap
 	pop	rax
 	pop	rax
 	pop	rdx
 	pop	rcx
 	pop	rbx
 	pop	rax
+	ret
+f_draw_point_offset:
+	cmp	bx, word[preview_width]	;clever code well done vignette
+	jae	.retpoint	;bc its unsigned negative values are treated as higher
+	cmp	ax, word[preview_height]
+	jae	.retpoint
+	push	rcx	;push these bc they are important
+	push	r15
+	push	rdx	;rdx in particular fucks up line drawing alg
+	mov	rcx, qword[offset_graphics_window]	;offset for drawing
+	imul	rax, qword[row_width_editor]	;multiply row number by width of row
+	imul	rbx, UNIT_SIZE	;multiply column number by unit size
+	add	rcx, rbx	;add to offset
+	add	rcx, rax	;again
+	movzx	rdx, word[rdi]	;move colour into here
+	mov	r15, qword[framebuf]	;bc r15 is smth else in point display
+	mov	word[r15+rcx+7], dx	;save here
+	movzx	rdx, byte[rdi+2]	;and last byte of colour
+	mov	byte[r15+rcx+9], dl	;save heere
+	mov	word[r15+rcx+11], si	;move in point id
+	pop	rdx
+	pop	r15
+	pop	rcx
+.retpoint:
 	ret
 f_draw_line:
 	push	r15	;god damn
@@ -603,8 +626,11 @@ f_draw_line:
 	jnz	.draw	;if no, (horizontal) draw
 	xchg	rax, rbx	;else, swap draw co-ords
 .draw:
-	push	rdi
-	lea	rdi, [white_ansi]
+	push	rdi	;this is a mess
+	lea	rdi, [white_ansi]	;go figure not commenting all this	
+	mov	r8, qword[jump_point]	;boring code
+	cmp	r8, f_draw_point_offset
+	jz	.skip_test_editor
 	cmp	rax, 0
 	jl	.skip_draw
 	cmp	rbx, 0
@@ -613,7 +639,12 @@ f_draw_line:
 	jae	.skip_draw
 	cmp	bx, word[window_size+2]
 	jae	.skip_draw
-	call	f_draw_point	;draw the point
+	jmp	.draw_normal
+.skip_test_editor:
+	mov	rdi, qword[line_colour]
+	mov	si, word[unit_template+11]
+.draw_normal:
+	call	r8	;draw the point
 .skip_draw:
 	pop	rdi
 	pop	rbx	;get back rbx and rax
@@ -755,6 +786,69 @@ f_initialise_screen:
 	add	rbx, 104
 	mov	dword[r15+rbx], "┬"
 	ret	;easy
+f_clear_lbar:
+	mov	rax, qword[lbar_offset]	;addr offset
+	movzx	rbx, word[window_size]	;use window height
+	sub	rbx, EDITOR_BBAR+2	;and sub bars from it so it matches
+.loop:
+	cmp	rbx, 0	;check if this is 0
+	jz	.end	;if yes finished
+	%assign	COUNTER	0
+	%rep	EDITOR_LBAR-2
+		mov	dword[r15+rax+COUNTER], " "	;otherwise clear the lbar
+		%assign	COUNTER	COUNTER+4
+	%endrep
+	add	rax, qword[row_width_editor]	;and go to next row
+	dec	rbx
+	jmp	.loop
+.end:
+	ret
+f_clear_preview:
+	mov	bx, word[preview_height]	;preview height in here
+	mov	rdx, qword[offset_graphics_window]	;and new row offset here
+.loop_height:
+	mov	rcx, rdx	;move in the offset to here
+	mov	ax, word[preview_width]	;reset preview width thing
+	cmp	bx, 0	;if row counter is 0 then finished
+	jz	.end
+.loop_row:
+	cmp	ax, 0	;if column counter is 0 then finished
+	jz	.end_row
+	mov	word[r15+rcx+7], "23"	;otherwise move in black ansi
+	mov	byte[r15+rcx+9], "2"
+	mov	word[r15+rcx+11], "  "	;clear the text also
+	add	rcx, UNIT_SIZE	;go to next unit
+	dec	ax	;decrease column counter
+	jmp	.loop_row	;loop over
+.end_row:
+	dec	bx	;after row end, decrease row counter
+	add	rdx, qword[row_width_editor]	;and go to next row (rdx is row start)
+	jmp	.loop_height	;loop over!
+.end:
+	ret
+f_generate_escapes:
+	push	rax	;give birth to rax
+	push	rbx
+	mov	ax, word[preview_width]	;preview window width in pixels
+.loop:
+	cmp	ax, 0	;check if iteration counter is 0
+	jz	.end	;if it is finished row
+	%assign	COUNTER	 0	;i = 0
+	%rep	UNIT_SIZE	;13 times repeat
+		mov	dl, byte[unit_template+COUNTER]	;transfer the bytes from escape template
+		mov	byte[r15+rbx+COUNTER], dl	;to here
+		%assign COUNTER	COUNTER+1 ;i += 1
+	%endrep
+	dec	ax	;decrease thisguy
+	add	rbx, UNIT_SIZE	;increase rbx by 13 for next escape
+	jmp	.loop		;loop over
+.end:
+	mov	byte[r15+rbx], 27	;and reset dword at end of row
+	mov	word[r15+rbx+1], "[0"
+	mov	byte[r15+rbx+3], "m"
+	pop	rbx
+	pop	rax
+	ret
 f_generate_row:
 	push	rax	;help this was so hard to debuggg
 	push	rbx
@@ -813,4 +907,172 @@ f_extrude_point:
 	fstp	dword[r15+8]
 	emms	;and ur done wasnt that easy
 	pop	r15	;pop back for future
+	ret
+f_apply_transformation:
+	lea	r14, [matrix_camera]	;multiply by new camera matrix
+	lea	r13, [obj_aux_2]	;result in copy memory
+	call	f_multiply_matrix	;multiply them
+	lea	r15, [obj_aux_2]	;nodes from last multiplication in obj_aux_1
+	lea	r14, [matrix_projection]	;multiply by projection matrix
+	lea	r13, [obj_aux_1]	;and result in first cube matrix
+	call	f_multiply_matrix	;go
+	lea	r15, [obj_aux_1]	;use r15 to hold matrix to normalise
+	call	f_normalise_matrix	;normalise matrix
+	lea	r15, [obj_aux_1]	;matrix A is result of normalisation
+	lea	r14, [matrix_screen]	;matrix B is screen matrix
+	lea	r13, [obj_aux_2]	;result matrix
+	call	f_multiply_matrix	;bdsaojoicxzoiwadpszx
+	ret
+f_init_matrices:
+	fild	word[r14]	;load window width
+	fild	word[r15]	;load window height
+	fdiv	st1	;divide window height by width
+	fld	dword[camera_h_fov]	;load h_fov
+	fmul	st1	;multiply it by window height / width
+	fst	dword[camera_v_fov]	;and thats camera_vfov
+	emms	;clearrr
+	call	f_projection_matrix	;generate projection matrix
+	movzx	r15, word[r15]
+	movzx	r14, word[r14]
+	call	f_screen_matrix	;and screen matrix
+	call	f_update_camera_axis	;update camera axis
+	call	f_camera_rotation_matrix	;and then regenerate the rotation matrix
+	call	f_camera_translation_matrix	;and translation matrix
+	lea	r15, [matrix_camera_translate]
+	lea	r14, [matrix_camera_rotate]
+	lea	r13, [matrix_camera]
+	call	f_multiply_matrix
+	ret
+f_display_points:
+	xor	rcx, rcx	;start at 0 for the faces string
+	xor	rdx, rdx
+	add	rcx, qword[points_dat]
+.loop_clear_points:
+	cmp	edx, dword[point_dat_offset]
+	jz	.finish_point_clear
+	mov	byte[rcx+rdx+3], 0b00000001
+	add	rdx, 4
+	jmp	.loop_clear_points
+.finish_point_clear:
+	xor	rcx, rcx
+	mov	r14, qword[edited_faces]	;addr in r14
+	lea	r15, [obj_aux_2]	;and points addr in here
+	mov	qword[jump_point], f_draw_point_offset	;use this point drawing function in line draw
+.loop_lines:
+	cmp	word[r14+rcx], 65535	;check if at end
+	jz	.finished_lines	;if yes STOPPPPP
+	cmp	byte[culling], 0
+	jz	.skip_cull
+	cmp	word[r14+rcx+6], 65533
+	jz	.draw_normal
+	mov	rdx, rcx
+	call	f_cull_backfaces
+	cmp	r8, 0
+	jnz	.draw_normal
+	mov	r13, qword[points_dat]
+	%assign	COUNTER	0
+	%rep	3
+		movzx	rax, word[r14+rcx+COUNTER]
+		shl	rax, 2
+		and	byte[r13+rax+3], 0b11111110
+		%assign	COUNTER	COUNTER+2
+	%endrep
+	jmp	.skip_draw
+.draw_normal:
+	mov	r13, qword[points_dat]
+	%assign	COUNTER	0
+	%rep	3
+		movzx	rax, word[r14+rcx+COUNTER]
+		shl	rax, 2
+		or	byte[r13+rax+3], 0b00000010
+		%assign	COUNTER	COUNTER+2
+	%endrep
+.skip_cull:
+	mov	qword[line_colour], white_ansi	;default colour is white
+	cmp	word[r14+rcx+6], 65533	;check if current face is terminated with this
+	jnz	.skip_preview_line	;if no do nothing
+	mov	qword[line_colour], yellow_ansi	;if yes use yellow for preview face
+.skip_preview_line:
+	push	rcx	;rcx is important to keep the same
+	%rep	2
+		movzx	rax, word[r14+rcx]	;move in index
+		shl	rax, 4	;multiply by 16
+		add	rax, 4	;and add 4 to get point offset
+		mov	rbx, qword[r15+rax]	;put the qword (X and Y pos) in here
+		mov	qword[line_start], rbx	;and move it into line start
+		movzx	rax, word[r14+rcx+2]	;do same thing but with next point index
+		shl	rax, 4
+		add	rax, 4
+		mov	rbx, qword[r15+rax]
+		mov	qword[line_end], rbx	;line end now
+		call	f_draw_line	;and draw a line!
+		add	rcx, 2	;go to next pair
+	%endrep
+	movzx	rax, word[r14+rcx]	;do same thing again.... why isnt it %rep 3...
+	shl	rax, 4
+	add	rax, 4
+	mov	rbx, qword[r15+rax]
+	mov	qword[line_start], rbx
+	movzx	rax, word[r14+rcx-4]	;bcnow it uses the first point! join back to the start
+	shl	rax, 4
+	add	rax, 4
+	mov	rbx, qword[r15+rax]
+	mov	qword[line_end], rbx
+	call	f_draw_line	;so clever 
+	pop	rcx
+.skip_draw:
+	add	rcx, 8	;go to next face
+	jmp	.loop_lines	;loop over
+.finished_lines:
+	mov	rcx, 4	;skip 16 now
+	mov	r14, qword[points_dat]	;and use different r14 addr
+.loop_draw:
+	cmp	dword[r15+rcx], 234356	;check if at end of matrix
+	jz	.finished_points	;if yes go here
+	fld	dword[r15+rcx]	;otherwise load x into fpu
+	fist	dword[buf1]	;store as int here
+	fld	dword[r15+rcx+4]	;same with y pos
+	fist	dword[buf1+4]
+	emms	;clear
+	mov	ebx, dword[buf1]	;store new vals for drawing point
+	mov	eax, dword[buf1+4]	;same
+	push	rcx	;push rcx bc its modified here
+	sub	rcx, 4	;subtract 4 to remove offset
+	shr	rcx, 2	;divide by 4 to format it for point data struct
+	cmp	byte[culling], 0
+	jz	.not_hidden
+	cmp	byte[r14+rcx+3], 0
+	jnz	.not_hidden
+	pop	rcx
+	add	rcx, 16
+	jmp	.loop_draw
+.not_hidden:
+	mov	si, word[r14+rcx+1]	;move the id into rsi	
+	lea	rdi, [blue_ansi]
+	test	byte[r14+rcx], 0b00001000
+	jnz	.c_editing
+	test	byte[r14+rcx], 0b00000100
+	jnz	.c_selected
+	test	byte[r14+rcx], 0b00000010
+	jnz	.c_preview
+	test	byte[r14+rcx], 0b00000001
+	jnz	.c_origin
+	jmp	.not_modify
+.c_editing:
+	lea	rdi, [purple_ansi]
+	jmp	.not_modify
+.c_selected:
+	lea	rdi, [green_ansi]
+	jmp	.not_modify
+.c_preview:
+	lea	rdi, [yellow_ansi]
+	jmp	.not_modify
+.c_origin:
+	lea	rdi, [red_ansi]
+.not_modify:
+	pop	rcx	;pop back rcx
+	call	f_draw_point_offset	;and draw the point
+	add	rcx, 16	;go to next point
+	jmp	.loop_draw	;loop over
+.finished_points:
 	ret

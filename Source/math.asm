@@ -1,3 +1,109 @@
+f_rodrigues_rotation:
+	movups	xmm0, [r15+4]	;move in vector to xmm0
+	movaps	xmm1, xmm0	;clone into xmm1
+	mulps	xmm0, xmm1	;get square of all elements
+	movaps	xmm1, xmm0	;clone into xmm1 again
+	haddps	xmm0, xmm0	;first val in xmm0 is now v1+v2
+	shufps	xmm1, xmm1, 0b00000010	;rearange xmm1 so v3 is in v0
+	addss	xmm0, xmm1	;add v0 to v0 in both (get sum of 3 vals)
+	sqrtss	xmm1, xmm0	;then square root of v0
+	shufps	xmm1, xmm1, 0b00000000	;broadcast this to all elements
+	movups	xmm0, [r15+4]	;then reload the originalvector
+	divps	xmm0, xmm1	;and divide by the sqrt thing to normalise vector
+	movups	[r15+4], xmm0	;store back
+	mov	dword[obj_aux_2], 12	;prepare space for skew matrix
+	mov	dword[obj_aux_2+4], 0	;like inserting 0s
+	mov	dword[obj_aux_2+20], 0
+	mov	dword[obj_aux_2+36], 0
+	mov	dword[obj_aux_2+40], 234356
+	fld	dword[r15+4]	;now, load different values from normalised vector
+	fst	dword[obj_aux_2+32]	;and store one in one place
+	fchs	;then invert the sign bit
+	fst	dword[obj_aux_2+24]	;and store that in another
+	fld	dword[r15+8]	;do this for all 3 normalised vector elements
+	fst	dword[obj_aux_2+12]	;it does smth dont ask
+	fchs
+	fst	dword[obj_aux_2+28]
+	fld	dword[r15+12]
+	fst	dword[obj_aux_2+16]
+	fchs
+	fst	dword[obj_aux_2+8]
+	emms	;reset this guy
+	push	r14	;push the addr of the angle to use for matrix
+	lea	r15, [obj_aux_2]	;now, copy skew matrix from aux_2
+	lea	r14, [obj_aux_1]	;to aux_1
+	call	f_copy_matrix
+	lea	r13, [matrix_ndc]	;now multiply them together into ndc
+	call	f_multiply_matrix	;to get symetric skew matrix
+	pxor	xmm0, xmm0	;clear xmm0
+	movups	[obj_aux_2+4], xmm0	;and now populate aux_2 with 0s
+	movups	[obj_aux_2+16], xmm0
+	movups	[obj_aux_2+28], xmm0
+	mov	dword[obj_aux_2+40], 234356	;create 3x3 identity matrix
+	mov	dword[obj_aux_2+4], 0x3F800000	;insert 1s atdiagnoal p much
+	mov	dword[obj_aux_2+20], 0x3F800000
+	mov	dword[obj_aux_2+36], 0x3F800000
+	pop	r14	;get back angle addr
+	fld	dword[r14]	;load it...
+	fsincos	;then get cos in st0 and sin in st1
+	fstp	dword[buf1+12]	;store this cos in buf2
+	fst	dword[buf1+8]	;and sin in buf1
+	fld	dword[buf1+12]	;then reload cos
+	fld1	;and a 1
+	fsub	st1	;subtract cos val from 1
+	fst	dword[buf1+12]	;and store back
+	emms
+	lea	r15, [buf1+8]	;load sin val
+	lea	r14, [obj_aux_1]	;and skew matrix
+	call	f_scalar_multiply_matrix	;multiply scalar by skew matrix
+	lea	r15, [obj_aux_2]	;then add result to identity matrix
+	call	f_add_matrix
+	lea	r15, [buf1+12]	;now multiply cos val
+	lea	r14, [matrix_ndc]	;by symetric skew matrix
+	call	f_scalar_multiply_matrix
+	lea	r15, [obj_aux_2]	;now add that to identity matrix to form rotation matrix
+	call	f_add_matrix
+	ret
+f_add_matrix:
+	mov	rax, 4	;skip first 16 / 12 / whatever
+.loop:
+	cmp	dword[r14+rax], 234356	;check if at end
+	jz	.end	;if yes go here
+	fld	dword[r15+rax]	;load current val of destination matrix
+	fld	dword[r14+rax]	;and source matrix
+	fadd	st1	;add together
+	fst	dword[r15+rax]	;then store in destination (just like add rax, rbx...)
+	emms	;reset stack bc its important
+	add	rax, 4	;go to next val
+	jmp	.loop	;loop over
+.end:
+	ret
+f_scalar_multiply_matrix:
+	mov	rax, 4
+.loop:
+	cmp	dword[r14+rax], 234356	;literally like
+	jz	.end	;exactly the same as the above
+	fld	dword[r15]	;except theres a scalar here
+	fld	dword[r14+rax]
+	fmul	st1
+	fst	dword[r14+rax]	;and its stored in the matrix instead ofc
+	emms
+	add	rax, 4
+	jmp	.loop
+.end:
+	ret
+f_get_id_offset:
+	xor	rcx, rcx	;u dont need an explanation for this
+.loop:
+	cmp	word[r15+rcx+1], ax	;cmon now
+	jz	.found_offset
+	add	rcx, 4
+	jmp	.loop
+.found_offset:
+	mov	rdx, rcx
+	inc	rcx
+	shl	rcx, 2
+	ret
 f_resize_bounding:	
 	cmp	dword[bounding_box], 0	;this resizes the bounding box to fit screen
 	jge	.skip_xl	;this part checks if the x is left off screen
@@ -94,26 +200,17 @@ f_get_bounding:
 	pop	rcx
 	ret
 f_euclidean_distance:
-	mov	edx, dword[matrix_ndc+rax+8]	;load the uh yeah
-	mov	dword[vertex_depth], edx
-	movups	xmm0, [r13+rax]	;vertex position into xmm0
-	movups	xmm1, [r8]	;camera position into xmm1
-	subps	xmm1, xmm0	;then subtract the vertex positions from the camera
-	movups	[buf1], xmm0	;store in this buffer
-	fld	dword[buf1]	;load first dword
-	fld	st0	;load it again
-	fmul	st1	;and multiply by itself to square it
-	fld	dword[buf1+4]	;do this with all values
-	fld	st0
-	fmul	st1
-	fld	dword[buf1+8]
-	fld	st0
-	fmul	st1
-	fadd	st2
-	fadd	st4
-	fsqrt	;square root it
-	fst	dword[vertex_dist]	;and store here
-	emms	;easy with SIMD!
+	movups	xmm7, [r14]	;vertex position into xmm0
+	movups	xmm8, [r15]	;camera position into xmm1
+	subps	xmm7, xmm8	;then subtract the vertex positions from the camera
+	movaps	xmm8, xmm7
+	mulps	xmm7, xmm8
+	movaps	xmm8, xmm7
+	haddps	xmm7, xmm7
+	shufps	xmm8, xmm8, 0b00000010
+	addss	xmm7, xmm8
+	sqrtss	xmm7, xmm7
+	movss	dword[vertex_dist], xmm7
 	ret
 f_sample_image:
 	push	rbx	;push	registers (return is rax soooo no rax)
@@ -211,12 +308,12 @@ f_barycentric_coords:
 	fst	dword[barycentric]	;and the result is u
 	emms
 	xor	r8, r8	;reset r8 (triangle bounds calculator)
-	movups	xmm0, [barycentric]
-	movups	xmm1, [simd_zeros]
+	movups	xmm0, [barycentric]	;cant remember how this works now
+	movups	xmm1, [simd_zeros]	;but it does so whatever
 	cmpnltps	xmm1, xmm0
 	movmskps	ebx, xmm0
 	movups	xmm0, [barycentric]
-	movups	xmm1, [simd_ones]
+	movaps	xmm1, [simd_ones]
 	cmpnltps	xmm0, xmm1
 	xor	rax, rax
 	movmskps	eax, xmm1
@@ -244,7 +341,7 @@ f_cross_product:
 	mulps	xmm0, xmm1	;multiply stuff together
 	mulps	xmm2, xmm3
 	subps	xmm0, xmm2	;and do the subtraction
-	movaps	[r13], xmm0	;then store it
+	movups	[r13], xmm0	;then store it
 	ret	;done! wasnt that easy :3
 f_edge_vector:
 	mov	rbx, 16	;multiplication value
@@ -281,7 +378,7 @@ f_float_ascii:
 	not	eax	;invert eax
 	inc	eax	;then inc to convert to positive
 	mov	dword[buf1], eax	;moves that into buf1
-	;add	r14, 4
+	;add	r14, 4	;why is this here
 .not_negative:
 	xor	rdx, rdx	;reset rdx
 	xor	rdi, rdi	;and rdi
@@ -317,25 +414,36 @@ f_float_ascii:
 	xor	rdi, rdi
 .div_d:
 	div	rcx	;this is just the same code as before
-	cmp	rax, 10
-	jae	.above_d
+	cmp	rdi, 2
+	jnz	.above_d
 	add	eax, 48
 	mov	dword[r13+r14], eax
 .loop:
 	add	r14, 4	;the only difference is that
 	add	edx, 48	;it doesnt check if the value is 0
 	mov	dword[r13+r14], edx	;because in decimals leading 0s are needed
-	cmp	rdi, 0
-	jz	.end
-	pop	rdx
-	dec	rdi
-	jmp	.loop
+	cmp	rdi, 0	;check if rdi is 0
+	jz	.end	;if yes then finish this section
+	pop	rdx	;else pop back rdx
+	dec	rdi	;decrease counter
+	jmp	.loop	;and loop
 .above_d:
-	inc	rdi
-	push	rdx
-	xor	rdx, rdx
-	jmp	.div_d
+	inc	rdi	;increase push counter
+	push	rdx	;do the push
+	xor	rdx, rdx	;and reset rdx
+	jmp	.div_d	;more loop
 .end:
+	cmp	dword[r13+r14], "0"	;check if trailing 0
+	jnz	.check_point	;if no, done
+	mov	dword[r13+r14], " "	;otherwise put in a space
+	sub	r14, 4	;decrease position
+	jmp	.end
+.check_point:
+	cmp	dword[r13+r14], "."	;check if its a .
+	jnz	.end_final	;if no, then completely done
+	mov	dword[r13+r14], " "	;otherwise remove it
+	sub	r14, 4	;decrease in this case
+.end_final:
 	ret
 f_pos_string:
 	lea	r15, [camera_position]	;float to generate string for
@@ -441,4 +549,3 @@ f_inc_bcd:
 	inc	byte[fps_counter]	;and increase the next sb
 .end:
 	ret
-

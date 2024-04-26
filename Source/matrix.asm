@@ -23,6 +23,7 @@ f_multiply_matrix:
 	sub	esi, 4	;if no, subtract one dword from rsi
 	add	rcx, 4	;add one dword to matrix B column counter (next column)
 	add	rdx, 4	;add one dword to matrix C position counter
+.b:
 	fldz
 	fst	dword[r13+rdx]
 	push	rdi	;push rdi (matrix A column value), as it is iterated over
@@ -110,14 +111,20 @@ f_camera_rotation_matrix:
 	ret
 f_copy_matrix:
 	xor	rbx, rbx	;crazy complex insane code
-.loop:
-	mov	eax, dword[r15+rbx]
-	mov	dword[r14+rbx], eax
-	cmp	eax, 234356
-	jz	.end
+	xor	rax, rax
+	mov	eax, dword[r15]
+	mov	dword[r14], eax
 	add	rbx, 4
+.loop:
+	cmp	dword[r15+rbx], 234356
+	jz	.end
+	movups	xmm0, [r15+rbx]
+	movups	[r14+rbx], xmm0
+	jz	.end
+	add	rbx, rax
 	jmp	.loop
 .end:
+	mov	dword[r14+rbx], 234356
 	ret
 f_translation_matrix:
 	mov	eax, dword[translation]	;wow how could this work 🤔🤔 
@@ -158,13 +165,13 @@ f_rotate_matrix_z:
 	emms
 	ret
 f_screen_matrix:
-	movzx	rax, word[window_size+2]	;load window width val
+	mov	rax, r14	;load window width val
 	shr	rax, 1	;diide it by 2, not accounting for floats
 	mov	dword[buf1], eax	;move this value into first buffer
 	fild	dword[buf1]	;loads onto fpu stack
 	fst	dword[matrix_screen+4]	;and store
 	fst	dword[matrix_screen+52]	;in places needed
-	movzx	rax, word[window_size]	;load window width val
+	mov	rax, r15	;load window width val
 	shr	rax, 1	;half it without accounting for floats
 	mov	dword[buf1], eax	;move into buffer 1
 	fild	dword[buf1]	;load it onto FPU stack

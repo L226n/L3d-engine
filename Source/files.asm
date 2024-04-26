@@ -95,11 +95,16 @@ f_read_obj:
 	mov	rsi, filesize	;store in here bc thats what first 8 bytes is
 	mov	rdx, 8	;read them
 	syscall
+	xor	r10, r10
+	lea	r9, [buf3]
+	cmp	byte[load_editor], 0
+	jnz	.skip_allocate
 	mov	eax, dword[filesize+4]	;move unpacked size into eax
 	call	f_calc_malloc	;get address for the data to go
 	mov	r9, qword[obj_addr]
 	mov	r10, qword[obj_addr_counter]
 	mov	qword[r9+r10], r12	;r12 is recieved addr
+.skip_allocate:
 	mov	rax, 0	;sys_read
 	mov	rdi, r8	;the file
 	mov	rsi, r12
@@ -109,6 +114,12 @@ f_read_obj:
 	mov	ebx, dword[filesize+4]	;load unpacked data size into ebx
 	sub	rbx, 4	;subtract 4
 	mov	ecx, dword[filesize]	;load packed data size into rcx
+	cmp	word[rax+rcx-2], 65535
+	jnz	.faces_present
+	mov	word[rax+rbx+2], 65535
+	sub	rcx, 2
+	jmp	.end_faces
+.faces_present:
 	sub	rcx, 8	;subtract 8????? why oh bc it gets the end of the data so u can interate over it
 	mov	dword[rax+rbx], 65535 << 16 | 65534	;this looks cool as shit
 	sub	rbx, 8	;just written 8 bytes so move back that amount
@@ -122,8 +133,11 @@ f_read_obj:
 	sub	rcx, 6	;and read data back 3
 	jmp	.load_faces	;load faces again
 .end_faces:
+	cmp	byte[load_editor], 0
+	jnz	.skip_addr_fix
 	add	qword[obj_addr_counter], 8
 	mov	r10, qword[obj_addr_counter]
+.skip_addr_fix:
 	mov	qword[r9+r10], rax	;save face data start stuff
 	add	qword[r9+r10], rbx
 	add	qword[r9+r10], 2	;it just moves offset sum into here
@@ -136,8 +150,8 @@ f_read_obj:
 	mov	rdx, qword[rax+rcx]	;move data at position into rdx
 	mov	r8, qword[rax+rcx+8]	;move other half into r8
 	mov	qword[rax+rbx], rdx	;move them into right place
-	mov	qword[rax+rbx+8], r8
-	mov	dword[rax+rbx+12], 0x3F800000	;binary for 1.0 (w coord)
+	mov	qword[rbx+rax+8], r8
+	mov	dword[rbx+rax+12], 0x3F800000	;hex for 1.0 (w coord)
 	cmp	rcx, 0	;check if rcx is 0 (at end)
 	jz	.end	;if yes, go to end
 	jmp	.load_vertices	;otherwise keep going!!!
@@ -471,7 +485,7 @@ f_write_obj:
 	mov	r9, 10
 	add	r15, 4	;add 4 to coordinate address (skip column value)
 	mov	rax, 2	;sys_open
-	mov	rdi, file	;file path string
+	mov	rdi, r10	;file path string
 	mov	rsi, 0b1001000010	;flags for O_CREAT | O_TRUNC | O_RDWR
 	mov	rdx, 0q777	;mode is 777 (everyone can read write and excecute)
 	syscall
@@ -500,6 +514,8 @@ f_write_obj:
 	mov	rdx, 2	;single byte
 	syscall
 	add	rbx, 2	;increase byte counter again
+	cmp	word[r14], 65535
+	jz	.end
 .write_faces:
 	mov	rax, 1	;yes
 	mov	rdi, r8
