@@ -94,6 +94,33 @@ f_choice_menu:
 	times 2	add	rax, r9	;go 2 rows below msg string
 	mov	r14, rax	;save this to r14
 	mov	dword[r15+rax], ">"	;insert yes selection
+	cmp	r10, -1
+	jz	.use_yn
+	push	rax
+	add	rax, 8
+	xor	rcx, rcx
+.loop_custom_str:
+	movzx	ebx, byte[r10+rcx]
+	cmp	ebx, 0
+	jz	.insert_no
+	mov	dword[r15+rax], ebx
+	inc	rcx
+	add	rax, 4
+	jmp	.loop_custom_str
+.insert_no:
+	pop	rax
+	xor	rcx, rcx
+	add	rax, r9
+	mov	r13, rax
+.loop_no_str:
+	movzx	ebx, byte[r11+rcx]
+	cmp	ebx, 0
+	jz	.print_menu
+	mov	dword[r15+rax+8], ebx
+	inc	rcx
+	add	rax, 4
+	jmp	.loop_no_str
+.use_yn:
 	mov	dword[r15+rax+8], "Y"
 	mov	dword[r15+rax+12], "e"
 	mov	dword[r15+rax+16], "s"
@@ -191,6 +218,7 @@ f_start_menu:
 	mov	word[choice_width], LSC_WARN_WIDTH
 	mov	word[choice_height], LSC_WARN_HEIGHT
 .ask_choice:
+	mov	r10, -1
 	call	f_choice_menu	;get choice menu
 	cmp	byte[choice], 0	;check if chose yes
 	jz	.return_yes	;go here if so
@@ -721,6 +749,7 @@ f_open_file_dialog:	;o h god
 	mov	dword[r15+rax], ">"
 	jmp	.print_menu
 .escape_dialog:
+	mov	byte[cwd_file], 0
 	mov	rax, 12	;brk now
 	mov	rdi, qword[brk]	;release memory
 	syscall

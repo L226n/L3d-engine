@@ -1,33 +1,26 @@
-f_read_tex:
-	push	r8	;push r8 bc its used in other important places
-	mov	rax, 2	;open file
-	mov	rdi, r15
-	xor	rsi, rsi
-	syscall
-	mov	r8, rax
-	xor	rax, rax
-	mov	rdi, r8
-	mov	rsi, filesize
-	mov	rdx, 4	;read filesize
-	syscall
+f_read_tex_legacy:
 	mov	eax, dword[filesize]	;move into rax
 	sub	rax, 4	;subtract 4
 	mov	rbx, 3
 	mul	rbx	;multiply by 3
 	add	rax, 4	;and then add 4 again
 	mov	rbx, rax	;this calculates how much memory to reserve (dword+expanded data)
+	mov	r15, r14
+	cmp	byte[load_editor], 255
+	jz	.cont_editor
 	call	f_calc_malloc
 	mov	r9, qword[obj_addr]	;move addr of object stuff into r9
 	mov	r10, qword[obj_addr_counter]	;move addr counter into r10
 	mov	qword[r9+r10], r12	;store addr in good place
 	add	qword[obj_addr_counter], 8	;increase counter by 1 qword
+	mov	r15, r12
+.cont_editor:
 	xor	rax, rax	;read
 	mov	rdi, r8
-	mov	rsi, r12	;store in reserved memory
+	mov	rsi, r15	;store in reserved memory
 	mov	edx, dword[filesize]	;read all rest of file
 	syscall
 	mov	rcx, rdx	;store length in rcx
-	mov	r15, [r9+r10]	;move addr into r15
 .loop:
 	dec	rcx	;decrease rcx (position counter)
 	cmp	rcx, 3	;check if its 3 (at end (but really start) of thing)
@@ -54,6 +47,89 @@ f_read_tex:
 	syscall
 	pop	r8	;POP BACK
 	ret
+f_read_tex:
+	mov	byte[buf4], 0	;alpha indicator is 0 by default
+	push	r8	;push r8 bc its used in other important places
+	mov	rax, 2	;open file
+	mov	rdi, r15
+	xor	rsi, rsi
+	syscall
+	mov	r8, rax	;new versions of files have a dword
+	xor	rax, rax	;that is a magic number as jang said
+	mov	rdi, r8	;it indicates file ver
+	mov	rsi, filesize	;put it here for now
+	mov	rdx, 4
+	syscall
+	cmp	dword[filesize], -1	;check if its -1 (new ver)
+	jnz	f_read_tex_legacy	;if no, load with legacy loader
+	xor	rax, rax	;otherwise load actual filesize
+	mov	rdi, r8
+	mov	rsi, filesize
+	mov	rdx, 4	;read filesize
+	syscall
+	mov	eax, dword[filesize]	;move into rax
+	sub	rax, 4	;subtract 4
+	mov	rbx, 3
+	mul	rbx	;multiply by 3
+	add	rax, 4	;and then add 4 again
+	mov	rbx, rax	;this calculates how much memory to reserve (dword+expanded data)
+	mov	r15, r14
+	cmp	byte[load_editor], 255
+	jz	.cont_editor
+	call	f_calc_malloc
+	mov	r9, qword[obj_addr]	;move addr of object stuff into r9
+	mov	r10, qword[obj_addr_counter]	;move addr counter into r10
+	mov	qword[r9+r10], r12	;store addr in good place
+	add	qword[obj_addr_counter], 8	;increase counter by 1 qword
+	mov	r15, r12
+.cont_editor:
+	sub	dword[filesize], 4	;correct filesize thing
+	shl	dword[filesize], 1	;by doubling it (w/o dimensions dword)
+	add	dword[filesize], 4	;to account for transparency byte
+	xor	rax, rax	;read
+	mov	rdi, r8
+	mov	rsi, r15	;store in reserved memory
+	mov	edx, dword[filesize]	;read all rest of file
+	syscall
+	mov	rcx, rdx	;store length in rcx
+.loop:
+	sub	rcx, 2	;decrease rcx (position counter)
+	cmp	rcx, 3	;check if its 3 (at end (but really start) of thing)
+	jle	.end	;if yes die
+	sub	rbx, 3	;decrease string counter by 3
+	xor	rdx, rdx	;reset rdx
+	movzx	rax, byte[r15+rcx]	;move number into rax
+	mov	r9b, byte[r15+rcx+1]	;save transparency byte here
+	mov	rsi, 10	;10 into rsi
+	idiv	rsi	;divide number by 10
+	add	rdx, 48	;convert remainder to ascii
+	mov	byte[r15+rbx+2], dl	;and store
+	xor	rdx, rdx	;yep
+	idiv	rsi	;same with everything else
+	add	rdx, 48
+	mov	byte[r15+rbx+1], dl
+	xor	rdx, rdx
+	idiv	rsi
+	add	rdx, 48
+	mov	byte[r15+rbx], dl
+	cmp	r9b, -1	;check if transparency byte is -1
+	jz	.loop	;if it is, (opaque) then loop over
+	mov	byte[buf4], 255	;if its NOT, set this to indicate transparent obj
+	sub	byte[r15+rbx], 48	;convert ascii back to int
+	shl	r9b, 4	;move transparency to bytse 2-4
+	or	r9b, 0b10000000	;then set the high bit
+	or	byte[r15+rbx], r9b	;and or it with the int!
+	jmp	.loop	;looop over
+.end:
+	cmp	byte[buf4], 0	;check if this is 0
+	jz	.no_alpha	;if yes then its not transparent
+	or	byte[r15], 0b10000000	;if it is set this bit to show so
+.no_alpha:
+	mov	rax, 3
+	mov	rdi, r8
+	syscall
+	pop	r8	;POP BACK
+	ret
 f_read_map:
 	push	r8	;you again.... its been soup wgagf
 	mov	rax, 2	;blehhhhhhhhhhhhhhhhh too silly for this
@@ -67,11 +143,14 @@ f_read_map:
 	mov	rdx, 4	;maybe should write a macro for this stuff cant be botheredd tho
 	syscall
 	mov	eax, dword[filesize]
+	cmp	byte[load_editor], 255
+	jz	.skip_alloc
 	call	f_calc_malloc	;bc its stored as raw data u dont have to calculate different vals
 	mov	r9, qword[obj_addr]	;its very easy
 	mov	r10, qword[obj_addr_counter]
 	mov	qword[r9+r10], r12
 	add	qword[obj_addr_counter], 8
+.skip_alloc:
 	xor	rax, rax	;wow ok this was stupid
 	mov	rdi, r8	;extremely basic non interesting function
 	mov	rsi, r12
@@ -384,14 +463,18 @@ f_write_scene:
 	ret
 f_write_tex:
 	mov	rax, 2	;system call for open!!
-	mov	rdi, file	;file path
+	mov	rdi, r10	;file path
 	mov	rsi, 0b1001000010	;and some args jsvnkvdsndslfc
 	mov	rdx, 0q777	;permissions like chmod 777 wow
 	syscall
 	mov	r8, rax	;SAVE fd
-	mov	rax, 1	;and write irrelevant data to start
+	mov	dword[filesize], -1
+	mov	rax, 1
 	mov	rdi, r8
 	mov	rsi, filesize
+	mov	rdx, 4
+	syscall
+	mov	rax, 1	;and write irrelevant data to start
 	mov	rdx, 4	;what matters is that its 4 bytes
 	syscall
 	mov	r9, 4	;u write image dimensions first
@@ -401,6 +484,7 @@ f_write_tex:
 	mov	rdx, 4	;its only 2 words so 4 bytes is fine
 	syscall
 .write_loop:
+	mov	byte[buf1+1], -1
 	movzx	rcx, byte[r15+rbx+2]	;lsBYTE not bit in rcx
 	sub	rcx, 48	;subtract 48 (convert to integer)
 	movzx	rdx, byte[r15+rbx+1]	;now second least significant byte
@@ -409,7 +493,18 @@ f_write_tex:
 	mul	rdx
 	add	rcx, rax	;and add to counter
 	movzx	rdx, byte[r15+rbx]	;do the same with msBYTE
+	mov	byte[buf1+1], -1
+	test	dl, 0b10000000
+	jz	.cont_opaque
+	mov	r10b, dl
+	and	r10b, 0b01110000
+	shr	r10b, 4
+	mov	byte[buf1+1], r10b
+	and	dl, 0b00001111
+	jmp	.skip_sub
+.cont_opaque:
 	sub	rdx, 48
+.skip_sub:
 	mov	rax, 100	;except 100 this time
 	mul	rdx
 	add	rcx, rax	;and add still (this converts an ascii 3 digit to integer)
@@ -417,7 +512,7 @@ f_write_tex:
 	mov	rax, 1	;write again
 	mov	rdi, r8
 	mov	rsi, buf1	;write result of mathy thing
-	mov	rdx, 1	;1 byte bc its not gonna be > 255
+	mov	rdx, 2	;1 byte bc its not gonna be > 255
 	syscall
 	inc	r9	;increase r9 data counter
 	cmp	byte[r15+rbx+3], 0	;check if at end of string
@@ -427,7 +522,7 @@ f_write_tex:
 .finish:
 	mov	rax, 8	;lseek to beginning yk the drill
 	mov	rdi, r8
-	xor	rsi, rsi
+	mov	rsi, 4
 	xor	rdx, rdx
 	syscall
 	mov	dword[filesize], r9d	;move data written into filesize
@@ -442,7 +537,7 @@ f_write_tex:
 	ret
 f_write_map:
 	mov	rax, 2	;sys_open
-	mov	rdi, file	;file path string
+	mov	rdi, r10	;file path string
 	mov	rsi, 0b1001000010	;flags for O_CREAT | O_TRUNC | O_RDWR
 	mov	rdx, 0q777	;mode is 777 (everyone can read write and excecute)
 	syscall
@@ -456,8 +551,7 @@ f_write_map:
 .loop:
 	mov	rax, 1	;write to file again!
 	mov	rdi, r8
-	mov	rsi, r15	;address of data start
-	add	rsi, rbx	;then offset from rbx
+	lea	rsi, [r15+rbx]	;address of data start
 	mov	rdx, 8	;length to write is qword (writing both uv coords)
 	syscall
 	add	rbx, 8	;increase position counter (doubles as data counter)

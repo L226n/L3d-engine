@@ -4,8 +4,6 @@
 %include	"matrix.asm"
 %include	"graphics.asm"
 %include	"math.asm"
-%include	"clock.asm"
-%include	"poll.asm"
 %include	"files.asm"
 %include	"gui.asm"
 ;external files
@@ -37,8 +35,11 @@ section	.data
 	camera_near_plane	dd	0.1
 	camera_far_plane	dd	100.0
 	;camera viewing planes
+	one	dd	1.0
 	two	dd	2
 	three	dd	3
+	eight	dd	8.0
+	nearly_one	dd	0.99
 	;2
 	angle	dd	0.05
 	cube_angle	dd	0.0
@@ -72,7 +73,8 @@ section	.data
 	align	16
 	buf1	dd	0, 0, 0, 0
 	buf2	dd	0
-	buf3	dd	0
+	buf3	dq	0
+	buf4	dq	0
 	;buffers
 	line_start	dd	0.0, 0.0
 	line_end	dd	8.0, 8.0
@@ -84,7 +86,7 @@ section	.data
 	movement_speed	dd	0.2
 	;movement speed
 	align	16
-	camera_position_cull	dd	0.0, -0.0, -3.0
+	camera_position_cull	dd	0.0, 0.0, -3.0
 	camera_position	dd	0.0, 0.0, -3.0
 	;camera position matrix
 	poll	dq	0
@@ -102,6 +104,10 @@ section	.data
 	time:
 		tv_sec	dq	0
 		tv_usec	dq	33333333
+	frame_start	dq	0
+	frame_start_sec	dq	0
+	frame_delta	dq	1000000000
+	frame_raw_delta	dq	1000000000
 	;time struct
 	handler_int:
 		dq	f_int
@@ -116,7 +122,7 @@ section	.data
 	;fpu control word
 	file_separator	dw	65535
 	;separator between 1 and 0
-	file	db	"test.lsc", 0, "xxxxxxxxxxxxxxxxxxxxxxx"
+	file	db	"../Resources/tetrapod.lsc", 0, "xxxxxxxxxxxxxxxxxxxxxxx"
 	;file path
 	filesize	dq	0
 	;size of file data
@@ -139,13 +145,13 @@ section	.data
 	vertex_depth	dd	0.0
 	;used in texture mapping for storing depth of vertex
 	vertex_dist	dd	0.0
-	bounding_box	dd	0, 0, 0, 0
+	bounding_box	dq	0, 0, 0, 0
 	;also texture mapping to get the box in which a triangle exists
 	interpolated_uvd	dd	0, 0, 0
 	;pretty easy
-	scene_meta	db	"fish.l3d", 0, "fish.luv", 0, "fish.ltx", 1, "ground.l3d", 0, "ground.luv", 0, "ground.ltx", 1, "cube.l3d", 0, "cube.luv", 0, "cube.ltx", 1, "tetrapod.l3d", 0, "tetrapod.luv", 0, "tetrapod.ltx", 10
-	obj_count	dw	4
-	init_info	db	0
+	scene_meta	db	"tetrapod.l3d", 0, "tetrapod.luv", 0, "tetrapod.ltx", 10
+	obj_count	dw	1
+	init_info	db	255
 			db	0
 			db	"075"
 			db	1
@@ -175,7 +181,7 @@ section	.data
 	bc_vectors	dd	0, 0, 0, 0, 0, 0, 0, 0
 	;stores vectors used in barycentric calcs
 	align	16
-	point	dd	0, 0
+	point	dq	0, 0
 	;another thing used for barycentrics
 	align	16
 	edge_vector_a	dd	0, 0, 0, 0
@@ -219,6 +225,9 @@ section	.data
 	yellow_ansi	db	"172"
 	green_ansi	db	"034"
 	purple_ansi	db	"092"
+	alpha_ansi	db	"000"
+	converted_ansi	db	"0000"
+	editor_invis_ansi	db	"016"
 	;ansi codes for various things (in memory for compat)
 	print_length	dq	0
 	;length of framebuf used sometimes messy code strikes again
@@ -259,6 +268,9 @@ section	.data
 	;editor bool
 	preview_width	dw	0
 	preview_height	dw	0
+	main_width	dq	0
+	max_width	dq	0
+	max_height	dq	0
 	offset_graphics_window	dq	0
 	row_width_editor	dq	0
 	row_width_bars	dq	0
@@ -272,6 +284,12 @@ section	.data
 	points_dat	dq	0
 	points_dat_len	dd	0
 	points_dat_available	dw	0
+	edited_texture	dq	0
+	edited_texture_len	dd	0
+	edited_texture_available	dw	0
+	edited_uv	dq	0
+	edited_uv_len	dd	0
+	edited_uv_available	dw	0
 	lbar_offset	dq	0
 	bbar_offset	dq	0
 	option_divisor	db	0
@@ -291,6 +309,7 @@ section	.data
 	jump_point	dq	0
 	edited_obj_offset	dq	20
 	edited_faces_offset	dq	0
+	edited_uv_offset	dq	0
 	point_dat_offset	dd	4
 	line_colour	dq	0
 	update_func	dq	0
@@ -300,6 +319,24 @@ section	.data
 	error_space	db	0
 	load_editor	db	0
 	project_saved	db	255
+	project_saved_3d	db	255
+	project_saved_tx	db	255
+	edit_texture	db	0
+	texture_pos	dw	0, 0
+	texture_offset	dw	0, 0
+	texel_mode	dw	0
+	color_pri	db	0b10000000, "16"
+	color_sec	db	0b10000000, "16"
+	use_secondary	db	0
+	int_ui_limit	dw	360
+	pen_prev_pos	dq	0
+	usec	dq	UDELTA
+	fd_old	dq	0
+	rspbuf	dq	0
+	pollfd:
+		dd	0
+		dw	1
+		dw	0
 	bbar_items:
 		.scope	dq	0
 		.culling	dq	0
@@ -330,8 +367,9 @@ section	.data
 		db	0	;transformation condition (always)
 		db	1	;transformation type (rotation)
 		db	1	;rotation axis (y)
-		dd	0.1	;rotation increment 
+		dd	0.03	;rotation increment 
 		dd	0.0	;current rotation
+		dw	-1
 		dw	0	;another object index again it is a FISH
 		db	0	;condition is always
 		db	0	;set position
@@ -367,6 +405,7 @@ section	.data
 	exit_code_offset	equ	25
 	open_game_str	db	"Open .lgm/.lsc files", 0
 	open_obj_str	db	"Open .l3d files", 0
+	open_tex_str	db	"Open .ltx files", 0
 	confirm_lsc_msg:
 		db	"WARNING: .lsc files represent a particular", 1
 		db	"scene in a game, rather than the full game.", 1
@@ -395,13 +434,19 @@ section	.data
 		db	"exists, and saving will overwrite", 1
 		db	"the already existing file, save", 1
 		db	"anyway?", 0
+	save_type_str	db	"Save file type", 0
+	save_uv	db	"Save UV file", 0
+	save_obj	db	"Save 3d file", 0
 	editor_err:
 		db	27, "[31"
 		dd	"m"
 		dd	"ER"
 		dd	"RO"
 		dd	"R_"
+	pen_prev:
+		db	27, "[48;5;000m 0", 27, "[48;5;000m 0", 27, "[0m     ", 0
 	;various messages
+	working_file	dq	working_file_3d
 section	.bss
 	termios:
 		c_iflag	resd	1
@@ -433,14 +478,25 @@ section	.bss
 	;menu options offsets
 	menu_entries	resw	50
 	option_data_id	resw	10	;10 id slots
-	option_data_rot	resb	36	;6 rotation slots
+	option_data_rot	resb	36	;18 rotation slots
 	option_data_pos	resd	9	;9 translation slots
 	selection	resd	50
-	working_file	resb	100
+	working_file_3d	resb	100
+	working_file_tx	resb	100
+	working_file_uv	resb	100
 section	.text
 	global	_start
 _start:
+	lea	r15, [scene_meta]
+	lea	r14, [obj_count]
+	lea	r13, [init_info]
+	lea	r12, [mainloop_info]
+	call	f_write_scene
 	finit	;initialise FPU control words
+	fstcw	word[cw]	;stores current control word in cw
+	and	word[cw], 0xFCFF	;uses bitmasks to change
+	or	word[cw], 0x0C00	;to truncating on fist/p
+	fldcw	word[cw]	;load the new control word
 	mov	rax, 12	;sys_brk woof!!!!!!! (sorry)
 	xor	rdi, rdi	;0 to get current brk
 	syscall
@@ -484,7 +540,7 @@ _start:
 	mov	rdx, resize_len
 	syscall
 	mov	dword[exit_msg+exit_code_offset], "0" << 24	;move in 0 to say successful exit
-	mov	r15, 255	;some sorta param
+	mov	r15, -1	;some sorta param
 	call	f_kill
 .term_ok:
 	movzx	rax, word[window_size]	;move window height into rax
@@ -500,7 +556,7 @@ _start:
 	mov	rdx, even_len
 	syscall
 	mov	dword[exit_msg+exit_code_offset], "0" << 24
-	mov	r15, 255
+	mov	r15, -1
 	call	f_kill
 .term_even:
 	shr	word[window_size+2], 1
@@ -530,38 +586,78 @@ _start:
 	call	f_editor
 .not_editor:
 	call	f_initialise_screen	;prepare the screen for display
-	mov	rax, 22	;system call for sys_pipe	
-	mov	rdi, pipe	;store resulting fds here
-	syscall
-	mov	rax, 57	;system call for sys_fork
-	syscall
-	cmp	rax, 0	;checks if child process
-	jz	f_clock	;if yes, go to clock process
-	mov	qword[tv_usec], 33333334
-	mov	rax, 57	;fork again
-	syscall
-	cmp	rax, 0	;check if child
-	jz	f_poll	;if yes, go to polling process
 	lea	r15, [window_size]
 	lea	r14, [window_size+2]
 	call	f_init_matrices
 	call	f_pos_string	;generate location string
 	call	f_insert_location	;then insert it into framebuf
-	call	f_read_scene
+	call	f_read_scene	;read the selected scene now
+	movzx	rax, word[window_size+2]	;move in window width
+	imul	rax, UNIT_SIZE	;multiply by unit size now
+	mov	qword[main_width], rax	;and store as main width (screen width bytes)
+	sub	rax, UNIT_SIZE	;subtract this 
+	mov	qword[max_width], rax	;and now this is max x pos
+	movzx	rbx, word[window_size]	;use y pos
+	sub	rbx, 4	;subtract task bar thing
+	add	rax, UNIT_SIZE	;get row length now
+	imul	rax, rbx	;and mul by height
+	mov	qword[max_height], rax	;to get max height!
 .loop:
+	mov	qword[rspbuf], rsp	;store stack pointer here for draw ordering
 	mov	rax, [poll]	;moves the address of the shared memory for polling 
 	mov	qword[rax], 0	;then clears the previously polled inputs
 	mov	rax, [frames]	;moves address for frames into rax
-	inc	dword[rax]	;increases it so a successful frame is counted
-	mov	rax, 0	;system call for READ
-	mov	edi, dword[pipe]	;pipe fd for pipe
-	mov	rsi, buf1	;buffer to store result (discarded)
-	mov	rdx, 1	;length to read (doesnt matter)
+	inc	dword[rax]	;increases it so a successful frame is counted	
+	mov	rax, UFRAME	;move frame time in ns into rax
+	sub	rax, qword[frame_raw_delta]	;now subtract the delta, get time remaining in frame
+	mov	qword[tv_sec], 0	;reset this
+	mov	qword[tv_usec], rax	;now wait for that amount of time
+	mov	rax, 35	;sys_nanosleep
+	mov	rdi, time	;this struct
+	xor	rsi, rsi
 	syscall
+	mov	rax, 228	;sys_gettime
+	mov	rdi, 4	;use CLOCK_MONOTONIC_RAW
+	mov	rsi, time	;put the results here
+	syscall
+	mov	rbx, qword[tv_usec]	;move in nanoseconds
+	sub	rbx, qword[frame_start]	;and subtract time in frame start
+	mov	rax, qword[tv_sec]	;same with seconds
+	sub	rax, qword[frame_start_sec]
+	mov	rcx, USEC	;move 1s in nanoseconds into rcx
+	mul	rcx	;now multiply seconds time difference by that
+	add	rax, rbx	;and add nanosecond time to get time delta
+	mov	qword[frame_delta], rax	;store here
+	mov	rax, qword[tv_usec]	;move in the nanoseconds currently
+	mov	rbx, qword[tv_sec]	;and seconds
+	mov	qword[frame_start], rax	;then store in frame start thing (new area p much)
+	mov	qword[frame_start_sec], rbx
+	mov	rax, USEC	;move in 1 second
+	mov	rbx, qword[frame_delta]	;and the frame delta
+	div	rbx	;now divide the second by the delta to get fps
+	xor	rcx, rcx	;reset high bits
+	mov	ecx, dword[fps_space]	;and move in fps space var
+	mov	r15, [framebuf]	;use framebuf
+	add	r15, rcx	;and add on fps space
+	inc	rax	;inc this bc its never full fps
+	call	f_int_ascii	;now convert int to ascii in fbuf
 	cmp	byte[alert_end], 0	;check if alert end is low
 	jz	.skip_clear_alert	;if yes dont do this
 	call	f_clear_alert	;otherwise do what this is
 .skip_clear_alert:
+	mov	rax, 7	;sys_poll
+	mov	rdi, pollfd	;poll using this thing
+	mov	rsi, 1	;forgot what this is but bleh
+	mov	rdx, 0
+	syscall
+	cmp	rax, 0	;check if return is 0
+	jle	.skip_read	;if it is that or lower skip read
+	mov	rax, 0	;otherwise read 4 bytes into poll space
+	mov	rdi, 0
+	mov	rsi, qword[poll]
+	mov	rdx, 4
+	syscall
+.skip_read:
 	call	f_input_cases	;input cases yeah
 	cmp	byte[paused], 0	;check if paused
 	jz	.not_paused	;ugh gonna cry
@@ -595,19 +691,80 @@ _start:
 	mov	qword[imported_addr+16], rcx
 	mov	rcx, qword[rbx+rax+24]	;object texture
 	mov	qword[imported_addr+24], rcx
+	test	byte[rcx], 0b10000000	;test the texture dimension thing
+	jz	.draw_opaque	;if high bit is 1 then its transparent
+	movzx	rax, byte[rcx]
+	push	qword[imported_addr]	;if it is transparent push all these addresses
+	push	qword[imported_addr+8]	;theres quite a few
+	push	qword[imported_addr+16]
+	push	qword[imported_addr+24]
+	push	word[obj_counter]	;also push this counter
+	push	qword[translation_index]	;and the index for translations
+	call	f_get_translation_index	;then get the next offset for the next object also
+	inc	byte[obj_counter]	;increase said counter
+	jmp	.skip_draw	;now skip doing the rest of the draw
+.draw_opaque:
 	call	f_process_translations	;forgot what this even does o wait nvm
 	inc	byte[obj_counter]	;increase said counter
 .loop_objects:
 	mov	r15, [imported_addr]	;use object vertices
 	call	f_apply_transformation	;does all matrix stuff, result in obj_aux_2
+	cmp	dword[r15], 0
+	jz	.skip_draw
 	lea	r15, [obj_aux_2]	;matrix to put onto screen
 	mov	r14, [imported_addr+8]	;array containing cube edge indexes
 	mov	r13, [imported_addr]	;containing cube vertices
 	mov	r12, [imported_addr+16]	;containing cube uv mapping
 	call	f_node_screen	;project onto screen
+.skip_draw:
 	movzx	rdx, byte[obj_counter]
 	cmp	dx, word[obj_count]	;if its at the end then done process more objects
-	jz	.loop	;finish frame if it is
+	jnz	.new_object
+.draw_transparent:
+	cmp	rsp, qword[rspbuf]	;check if stack has been fully stopped
+	jz	.done_transparent	;if yes finished with transparent things!
+	pop	qword[translation_index]	;now pop back all the stuff u pushed
+	pop	word[obj_counter]	;bc its needed for the rest of this process
+	pop	qword[imported_addr+24]
+	pop	qword[imported_addr+16]
+	pop	qword[imported_addr+8]
+	pop	qword[imported_addr]
+	call	f_process_translations	;process the translations for this obj
+	mov	r15, [imported_addr]	;use object vertices
+	call	f_apply_transformation	;does all matrix stuff, result in obj_aux_2
+	cmp	dword[r15], 0
+	jz	.draw_transparent
+	lea	r15, [obj_aux_2]	;matrix to put onto screen
+	mov	r14, [imported_addr+8]	;array containing cube edge indexes
+	mov	r13, [imported_addr]	;containing cube vertices
+	mov	r12, [imported_addr+16]	;containing cube uv mapping
+	mov	r10, qword[imported_addr+24]
+	and	byte[r10], 0b01111111	;clear high bit so it doesnt fuck dimensions
+	call	f_node_screen	;project onto screen
+	mov	r10, qword[imported_addr+24]	;then set it again for the future
+	or	byte[r10], 0b10000000
+	jmp	.draw_transparent	;loop over
+.done_transparent:
+	mov	rax, 1	;print the current frame
+	mov	rdi, 1
+	mov	rsi, [framebuf]
+	mov	edx, dword[screen_size]
+	add	edx, TOP_SIZE
+	syscall
+	mov	rax, 228	;now sys_gettime again
+	mov	rdi, 4	;raw monotonic
+	mov	rsi, time
+	syscall
+	mov	rbx, qword[tv_usec]	;move in current time
+	sub	rbx, qword[frame_start]	;and subtract the frame start time
+	mov	rax, qword[tv_sec]	;same with seconds
+	sub	rax, qword[frame_start_sec]
+	mov	rcx, USEC
+	mul	rcx	;and do the mul thing
+	add	rbx, rax	;add together!
+	mov	qword[frame_raw_delta], rbx	;this is now the frame delta
+	jmp	.loop
+.new_object:
 	cmp	byte[alerted], 0	;check if not alerted
 	jz	.no_alert	;its okay!
 	call	f_alert	;dont cry you have someone
@@ -649,6 +806,16 @@ f_kill:
 	xor	rsi, rsi
 	mov	esi, dword[edited_faces_len]
 	syscall
+	mov	rax, 11	;and same again
+	mov	rdi, qword[edited_texture]
+	xor	rsi, rsi
+	mov	esi, dword[edited_texture_len]
+	syscall
+	mov	rax, 11	;and same again
+	mov	rdi, qword[edited_uv]
+	xor	rsi, rsi
+	mov	esi, dword[edited_uv_len]
+	syscall
 .skip_editor_unmaps:
 	mov	rax, 11	;sys_munmap
 	mov	rdi, [poll]	;start of memory to unmap
@@ -666,14 +833,14 @@ f_kill:
 	add	rbx, 16	;go to next bit to unmap
 	jmp	.unmap_loop	;shoutout to Shosela from freddy five night
 .done:
-	cmp	r15, 255	;if this dont clear terminal
-	jz	.skip_clear
+	cmp	r15, -1
+	jz	.no_clear
 	mov	rax, 1	;print a clear terminal sequence
 	mov	rdi, 1
 	mov	rsi, clear
 	mov	rdx, 6
 	syscall
-.skip_clear:
+.no_clear:
 	mov	rax, 1	;move in exit messages
 	mov	rdi, 1
 	mov	rsi, exit_msg	;yep

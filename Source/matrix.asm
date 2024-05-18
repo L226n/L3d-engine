@@ -23,7 +23,6 @@ f_multiply_matrix:
 	sub	esi, 4	;if no, subtract one dword from rsi
 	add	rcx, 4	;add one dword to matrix B column counter (next column)
 	add	rdx, 4	;add one dword to matrix C position counter
-.b:
 	fldz
 	fst	dword[r13+rdx]
 	push	rdi	;push rdi (matrix A column value), as it is iterated over
@@ -65,29 +64,40 @@ f_multiply_matrix:
 f_normalise_matrix:
 	;!!!NOTE!!! normalised z coord is calculated
 	;and un-normalised is stored in an ndc matrix!!
-	push	rax	;push used register
-	xor	rax, rax	;reset rax
+	mov	dword[r15], 16
+	push	rbx	;push used register
+	xor	rbx, rbx	;reset rax
 .loop:
-	cmp	dword[r15+rax+4], 234356	;check if at end of matrix
+	cmp	dword[r15+rbx+4], 234356	;check if at end of matrix
 	jz	.end	;if yes, go to end
-	add	rax, 16	;otherwise add column length to rax (next row)
-	fld	dword[r15+rax]	;load W value
-	fld	dword[r15+rax-4]	;load Y value
-	fst	dword[matrix_ndc+rax-4]	;store non-normalised val
-	fdiv	st1	;divide Y by W
-	fst	dword[r15+rax-4]	;store new value
-	fld	dword[r15+rax-8]	;load Y value
-	fdiv	st2	;divide Y by W
-	fst	dword[r15+rax-8]	;store new value
-	fld	dword[r15+rax-12]	;load X value
-	fdiv	st3	;divide X by W
-	fst	dword[r15+rax-12]	;store new value
+	add	rbx, 16	;otherwise add column length to rax (next row)
+	fld	dword[r15+rbx]	;load W value
+	fld	dword[r15+rbx-4]	;load z value
+	fst	dword[matrix_ndc+rbx-4]	;store non-normalised val
+	fdiv	st1	;divide z by W
+	fst	dword[r15+rbx-4]	;store new value
+	fld1
+	fcomi	st1
+	jb	.clip
+	fchs
+	fcomi	st1
+	ja	.clip
+	fld	dword[r15+rbx-8]	;load Y value
+	fdiv	st3	;divide Y by W
+	fst	dword[r15+rbx-8]	;store new value
+	fld	dword[r15+rbx-12]	;load X value
+	fdiv	st4	;divide X by W
+	fst	dword[r15+rbx-12]	;store new value
 	fld1	;load value of 1
-	fst	dword[r15+rax]	;store in W value
+	fst	dword[r15+rbx]	;store in W value
 	emms	;reset
 	jmp	.loop	;loop over
 .end:
-	pop	rax	;pop back register
+	pop	rbx	;pop back register
+	ret
+.clip:
+	mov	dword[r15], 0
+	pop	rbx
 	ret
 f_camera_rotation_matrix:
 	mov eax, dword[matrix_right+4]	;this code generates the camera matrix

@@ -1,3 +1,13 @@
+%macro	test_arrows	5
+	cmp	%5, "[A"
+	jz	%1
+	cmp	%5, "[B"
+	jz	%2
+	cmp	%5, "[D"
+	jz	%3
+	cmp	%5, "[C"
+	jz	%4
+%endmacro
 f_input_cases:
 	xor	rcx, rcx	;xor register thats used for storing keys ui memory
 	mov	rax, [poll]	;move addr of polling space into rax
@@ -44,14 +54,9 @@ f_input_cases:
 	jz	case_e.editor
 	ret
 .escape_editor:
-	cmp	word[rax+1], "[D"	;escapes use different labels also
-	jz	.case_left_editor
-	cmp	word[rax+1], "[C"
-	jz	.case_right_editor
-	cmp	word[rax+1], "[A"
-	jz	.case_up_editor
-	cmp	word[rax+1], "[B"
-	jz	.case_down_editor
+	test_arrows\
+	.case_up_editor, .case_down_editor, .case_left_editor,\
+	.case_right_editor, word[rax+1]
 	ret
 .escape:
 	cmp	byte[paused], 0	;only check for f keys so you can actually unpause
@@ -271,6 +276,7 @@ f_shift_keys:
 	mov	dword[rbx+rcx+8], edx
 	ret
 f_translate_camera:
+	emms
 	fld	dword[r15+12]	;load the values in the directional matrix
 	fld	dword[r15+8]	;all of them
 	fld	dword[r15+4]
@@ -373,6 +379,16 @@ f_editor_binds:
 	cmp	byte[buf1], "p"	;otherwise check global scope binds
 	jz	.preview_mode	;if p then its different
 	insert_str	SCOPE_1
+	cmp	byte[buf1], 27
+	jnz	.not_escapes
+	cmp	word[buf1+1], "[D"
+	jnz	.not_left
+	mov	byte[scope], 1
+	ret
+.not_left:
+.not_escapes:
+	cmp	byte[edit_texture], 255
+	jz	.global_binds
 	cmp	byte[buf1], "P"		
 	jz	f_new_point	;P = draw new point
 	cmp	byte[buf1], "F"
@@ -391,6 +407,11 @@ f_editor_binds:
 	jz	f_vector_trig
 	cmp	byte[buf1], "n"
 	jz	f_rotate_normal
+	cmp	byte[buf1], "f"
+	jz	f_remove_face
+	cmp	byte[buf1], "U"
+	jz	f_map_face
+.global_binds:
 	insert_str	SCOPE_0	;put in scope string 0 if no keys in here
 	cmp	byte[buf1], "O"
 	jz	f_open_file
@@ -400,6 +421,8 @@ f_editor_binds:
 	jz	f_save_file
 	cmp	byte[buf1], "C"
 	jz	f_new_file
+	cmp	byte[buf1], "M"
+	jz	f_edit_mode
 .retpoint:
 	ret
 .preview_mode:
@@ -407,8 +430,10 @@ f_editor_binds:
 	insert_str	SCOPE_2	;then insert a scope 2 thing
 	ret
 .preview_init:
+	cmp	byte[edit_texture], 255
+	jz	f_test_texture
 	lea	rax, [buf1]	;load buffer 1 into rax
-	jz	f_input_cases.input	;and now u can just reuse this subroutine
+	jmp	f_input_cases.input	;and now u can just reuse this subroutine
 .lbar_binds:
 	cmp	byte[buf1], 27	;check if escape sequence
 	jz	.lbar_escapes	;if yes go here
@@ -418,7 +443,7 @@ f_editor_binds:
 	jz	.skip_type_id	;if yes skip thisn ext bit
 	movzx	rcx, word[selected_option]	;the next bit:
 	shr	rcx, 1	;it checks to see if the current menu item is a id
-	cmp	byte[menu_entries+rcx], 1	;if it is,
+	cmp	byte[menu_entries+rcx], WIDGET_ID	;if it is,
 	jz	.check_type_id	;then skip normal binds
 .skip_type_id:
 	cmp	byte[buf1], "+"	;+ goes here
@@ -459,9 +484,9 @@ f_editor_binds:
 .lbar_enter:
 	movzx	rcx, word[selected_option]	;get selected opt
 	shr	rcx, 1	;correct to work with menu entries
-	cmp	byte[menu_entries+rcx], 4	;check if toggle box
+	cmp	byte[menu_entries+rcx], WIDGET_BOX	;check if toggle box
 	jz	f_toggle_option	;if yes go here
-	cmp	byte[menu_entries+rcx], 0	;check if its a button
+	cmp	byte[menu_entries+rcx], WIDGET_BUTTON	;check if its a button
 	jnz	.not_apply	;if no then return
 	mov	byte[project_saved], 0
 	shl	rcx, 1	;then correct rcx again
@@ -472,11 +497,23 @@ f_editor_binds:
 .lbar_plus_minus:
 	movzx	rcx, word[selected_option]	;similar thing as above
 	shr	rcx, 1
-	cmp	byte[menu_entries+rcx], 1	;except it checks all these too
+	cmp	byte[menu_entries+rcx], WIDGET_ID	;except it checks all these too
 	jz	f_modify_id	;and if the type is correct go to the important bit here
-	cmp	byte[menu_entries+rcx], 2
+	cmp	byte[menu_entries+rcx], WIDGET_POS
 	jz	f_modify_pos
-	cmp	byte[menu_entries+rcx], 3
+	cmp	byte[menu_entries+rcx], WIDGET_FACE
+	jz	f_modify_face
+	mov	word[int_ui_limit], 360
+	cmp	byte[menu_entries+rcx], WIDGET_INT+INT_360
+	jz	f_modify_angle
+	mov	word[int_ui_limit], 256
+	cmp	byte[menu_entries+rcx], WIDGET_INT+INT_256
+	jz	f_modify_angle
+	mov	word[int_ui_limit], 101
+	cmp	byte[menu_entries+rcx], WIDGET_INT+INT_100
+	jz	f_modify_angle
+	mov	word[int_ui_limit], 9
+	cmp	byte[menu_entries+rcx], WIDGET_INT+INT_8
 	jz	f_modify_angle
 	ret
 .lbar_escapes:
@@ -485,7 +522,7 @@ f_editor_binds:
 	cmp	byte[type_id], 0	;if type id is disabled
 	jz	.skip_type_checks	;check escapes normally
 	push	r15	;otherwise push r15
-	cmp	byte[menu_entries+rax], 1	;check if current val is a id box
+	cmp	byte[menu_entries+rax], WIDGET_ID	;check if current val is a id box
 	jnz	.finished_id	;if its NOT then go away mf u arent wanted 100 emoji
 	movzx	rbx, byte[menu_entries+rax+1]	;otherwise its nice and friendly 😊
 	shl	rax, 1	;get rax back
@@ -548,4 +585,60 @@ f_editor_binds:
 	movzx	rax, word[selected_option]	;(this just moves the cursor thing into position)
 	mov	ebx, dword[menu_options+rax]
 	mov	dword[r15+rbx], ">"	;its basic
+	ret
+f_test_texture:
+	cmp	byte[buf1], 10
+	jz	f_apply_texel
+	cmp	byte[buf1], "x"
+	jnz	.not_x
+	not	byte[use_secondary]
+	mov	byte[update], 1
+	jmp	.not_arrow
+.not_x:
+	cmp	byte[buf1], "p"
+	jnz	.not_p
+	mov	byte[texel_mode], 0
+	jmp	.not_arrow
+.not_p:
+	cmp	byte[buf1], "b"
+	jnz	.not_b
+	mov	byte[texel_mode], 1
+	jmp	.not_arrow
+.not_b:
+	cmp	byte[buf1], "l"
+	jnz	.not_l
+	mov	byte[texel_mode], 2
+	mov	byte[texel_mode+1], 0
+	jmp	.not_arrow
+.not_l:
+	cmp	byte[buf1], 27
+	jnz	.not_arrow
+	test_arrows	\
+	.key_up, .key_down, .key_left, .key_right, word[buf1+1]
+	jmp	.not_arrow
+.key_left:
+	cmp	word[texture_pos], 0
+	jz	.not_arrow
+	dec	word[texture_pos]
+	jmp	.not_arrow
+.key_right:
+	mov	ax, word[dimensions]
+	dec	ax
+	cmp	word[texture_pos], ax
+	jz	.not_arrow
+	inc	word[texture_pos]
+	jmp	.not_arrow
+.key_up:
+	cmp	word[texture_pos+2], 0
+	jz	.not_arrow
+	dec	word[texture_pos+2]
+	jmp	.not_arrow
+.key_down:
+	mov	ax, word[dimensions+2]
+	dec	ax
+	cmp	word[texture_pos+2], ax
+	jz	.not_arrow
+	inc	word[texture_pos+2]
+.not_arrow:
+	mov	byte[update], 1
 	ret

@@ -105,25 +105,25 @@ f_get_id_offset:
 	shl	rcx, 2
 	ret
 f_resize_bounding:	
-	cmp	dword[bounding_box], 0	;this resizes the bounding box to fit screen
+	cmp	qword[bounding_box], 0	;this resizes the bounding box to fit screen
 	jge	.skip_xl	;this part checks if the x is left off screen
-	mov	dword[bounding_box], 0	;if it is, set it to 0 to skip offscreen processing
+	mov	qword[bounding_box], 0	;if it is, set it to 0 to skip offscreen processing
 .skip_xl:
 	movzx	rax, word[window_size+2]	;if x is greater than screen space
 	dec	rax	;this thing
-	cmp	dword[bounding_box+8], eax	;its just this for everything
+	cmp	qword[bounding_box+16], rax	;its just this for everything
 	jle	.skip_xg
-	mov	dword[bounding_box+8], eax
+	mov	qword[bounding_box+16], rax
 .skip_xg:
-	cmp	dword[bounding_box+4], 0
+	cmp	qword[bounding_box+8], 0
 	jge	.skip_yl
-	mov	dword[bounding_box+4], 0
+	mov	qword[bounding_box+8], 0
 .skip_yl:
 	movzx	rax, word[available_window]
 	dec	rax
-	cmp	dword[bounding_box+12], eax
+	cmp	qword[bounding_box+24], rax
 	jle	.skip_yg
-	mov	dword[bounding_box+12], eax
+	mov	qword[bounding_box+24], rax
 .skip_yg:
 	ret
 f_check_minmax:
@@ -171,6 +171,7 @@ f_get_bounding:
 	mov	rbx, 16
 	mul	rbx
 	add	rax, 4
+	xor	rbx, rbx
 	mov	rbx, qword[r15+rax]	;load screen space coords into rbx
 	mov	qword[bounding_box], rbx	;move that to initialise bounding box
 	mov	qword[bounding_box+8], rbx	;for x and y
@@ -188,15 +189,17 @@ f_get_bounding:
 	add	rax, 4
 	mov	rdi, rax
 	call	f_check_minmax
-	fld	dword[bounding_box+12]	;load all coords and convert them to integers
-	fist	dword[bounding_box+12]
-	fld	dword[bounding_box+8]
-	fist	dword[bounding_box+8]
-	fld	dword[bounding_box+4]
-	fist	dword[bounding_box+4]
-	fld	dword[bounding_box]
-	fist	dword[bounding_box]
-	emms
+	movups	xmm0, [bounding_box]
+	cvtps2dq	xmm0, xmm0
+	movups	[bounding_box], xmm0
+	movsx	rcx, dword[bounding_box+12]
+	mov	qword[bounding_box+24], rcx
+	movsx	rcx, dword[bounding_box+8]
+	mov	qword[bounding_box+16], rcx
+	movsx	rcx, dword[bounding_box+4]
+	mov	qword[bounding_box+8], rcx
+	movsx	rcx, dword[bounding_box]
+	mov	qword[bounding_box], rcx
 	pop	rcx
 	ret
 f_euclidean_distance:
@@ -215,16 +218,41 @@ f_euclidean_distance:
 f_sample_image:
 	push	rbx	;push	registers (return is rax soooo no rax)
 	push	rcx
-	fild	word[r13]	;load image size x
+	fldz
+	fld1
 	fld	dword[interpolated_uvd]	;load uv coords x
+	fcomi	st1
+	jb	.no_clamp_l1
+	fld	dword[nearly_one]
+	jmp	.no_clamp_g1
+.no_clamp_l1:
+	fcomi	st2
+	ja	.no_clamp_g1
+	fldz
+.no_clamp_g1:
 	fabs	;get absolute value, prevents some crashes
+	fild	word[r13]	;load image size x
 	fmul	st1	;multiply together to get cartesian coords
 	fist	dword[interpolated_uvd]	;store back in uv coords bc they are interpolated anyway
-	fild	word[r13+2]	;do the same but with y positions
+	emms
+
+	fldz
+	fld1
 	fld	dword[interpolated_uvd+4]
+	fcomi	st1
+	jb	.no_clamp_l2
+	fld	dword[nearly_one]
+	jmp	.no_clamp_g2
+.no_clamp_l2:
+	fcomi	st2
+	ja	.no_clamp_g2
+	fldz
+.no_clamp_g2:
 	fabs	;same here
+	fild	word[r13+2]	;do the same but with y positions
 	fmul	st1
 	fist	dword[interpolated_uvd+4]
+
 	emms	;reset stack
 	mov	eax, dword[interpolated_uvd]	;move in cartesian x
 	mov	rcx, 3	;3
@@ -272,12 +300,12 @@ f_barycentric_coords:
 	pshufd	xmm1, xmm0, 0b00000001	;align values
 	paddd	xmm0, xmm1	;and get sum
 	movd	[dot_products+4], xmm0	;store as d01
-	mov	eax, dword[dot_products]	;rax is now d00
-	mov	ebx, dword[dot_products+8]	;and rbx d11
-	mul	ebx	;multiply them by each other
+	movsx	rax, dword[dot_products]	;rax is now d00
+	movsx	rbx, dword[dot_products+8]	;and rbx d11
+	mul	rbx	;multiply them by each other
 	mov	qword[denom], rax	;and store this in denominator quad
-	mov	eax, dword[dot_products+4]	;d01 is in rax
-	mul	eax	;and multiplied by itself
+	movsx	rax, dword[dot_products+4]	;d01 is in rax
+	mul	rax	;and multiplied by itself
 	sub	qword[denom], rax	;subtract this from the denominator
 	;denom = d00 * d11 - d01 * d01
 	fild	qword[denom]	;load denominator to divide value by
@@ -354,11 +382,35 @@ f_edge_vector:
 	subps	xmm1, xmm0
 	movaps	[r13], xmm1
 	ret
+f_int_ascii:
+	mov	r8, rsp
+	mov	rbx, 10
+.loop_div:
+	xor	rdx, rdx
+	idiv	rbx
+	push	rdx
+	cmp	rax, 10
+	jl	.end_of_str
+	jmp	.loop_div
+.end_of_str:
+	cmp	rax, 0
+	jz	.skip_rax
+	add	rax, 48
+	mov	dword[r15], eax
+	add	r15, 4
+.skip_rax:
+	cmp	rsp, r8
+	jz	.end
+	pop	rdx
+	add	rdx, 48
+	mov	dword[r15], edx
+	add	r15, 4
+	jmp	.skip_rax
+.end:
+	mov	dword[r15], " "
+	mov	dword[r15+4], " "
+	ret
 f_float_ascii:
-	fstcw	word[cw]	;stores current control word in cw
-	and	word[cw], 0xFCFF	;uses bitmasks to change
-	or	word[cw], 0x0C00	;to truncating on fist/p
-	fldcw	word[cw]	;load the new control word
 	fld	dword[r15]	;load the value to convert to ascii
 	fist	dword[buf1]	;store the truncated value in buf1
 	fild	dword[buf1]	;load truncated value
@@ -512,6 +564,7 @@ f_calc_malloc:
 	pop	rax
 	jmp	.end	;go to end
 .allocate:
+	mov	qword[mem_available], rbx	;move allocated size into memory counter
 	mov	rax, 9	;system call for sys_mmap
 	mov	rdi, 0	;automatic start
 	mov	rsi, rbx	;size in pages in rbx
@@ -527,10 +580,9 @@ f_calc_malloc:
 	add	word[reserved_pos], 16	;add 16 to the counter (2 qwords)
 	mov	rbx, rax
 	pop	rax	;get back requested size 
+	sub	qword[mem_available], rax	;then subtract size used
 	add	rax, rbx	;add the requested size to mem addr
 	mov	qword[last_memory], rax	;moves that into last memory pos
-	mov	qword[mem_available], rbx	;move allocated size into memory counter
-	sub	qword[mem_available], rax	;then subtract size used
 .end:
 	pop	r8	;pop back everything
 	pop	r9
