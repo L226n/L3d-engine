@@ -15,6 +15,7 @@ PHDRS
     bss PT_LOAD FLAGS(06);                /* 06 -> Read and Write */
 }
 ```
-**Step 5:** Save this file, and then cd to the location of the source .asm scripts\
-**Step 6:** type the command ``nasm -f elf64 -o L3d.out && ld -T linker.ld -o L3d L3d.out`` (make sure the path to linker.ld is correct)\
+**Step 5:** Find a section in linker.ld that starts with ``.text    : {``, and then after the closing curly bracket type ``:text``\
+**Step 6:** Save this file, and then cd to the location of the source .asm scripts\
+**Step 7:** type the command ``nasm -f elf64 -o L3d.out L3d.asm && ld -T linker.ld -o L3d L3d.out`` (make sure the path to linker.ld is correct)\
 After this, L3d should be executable to run in your terminal!
