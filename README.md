@@ -1,4 +1,5 @@
 # L3d engine
+## NOTE THAT THIS REPOSITORY IS BEING REWRITTEN AND THE CURRENT VERSION IS AVAILABLE AT https://github.com/L226n/L3d2/
 A little 3d graphics engine in x86-64 ASM\
 Updating this desc finally!!! 🎉🎉🎉\
 For now, it will just have some instructions on how to assemble this urself if u want to / if the given executable doesnt work\
